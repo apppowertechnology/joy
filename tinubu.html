@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Control | tinubu</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <style>
+        body.dev-bg { background: #0a0a0a; color: #e0e0e0; font-family: 'Montserrat', sans-serif; }
+        .dev-container { max-width: 900px; margin: 50px auto; padding: 20px; }
+        .auth-overlay { position: fixed; inset: 0; background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .dev-card { background: #1a1a1a; border: 1px solid #333; padding: 30px; border-radius: 12px; margin-bottom: 20px; }
+        .status-pill { padding: 5px 15px; border-radius: 50px; font-size: 0.8rem; font-weight: bold; }
+        .status-active { background: #1b4332; color: #2dce89; }
+        .status-locked { background: #4a1a1a; color: #f5365c; }
+        .dev-btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; margin: 5px; }
+        .btn-lock { background: #f5365c; color: white; }
+        .btn-unlock { background: #2dce89; color: white; }
+        .btn-extend { background: #d4af37; color: black; }
+        .log-list { height: 150px; overflow-y: auto; background: #000; padding: 10px; font-family: monospace; font-size: 0.85rem; border: 1px solid #333; }
+        input[type="text"], input[type="datetime-local"] { background: #222; border: 1px solid #444; color: white; padding: 10px; width: 100%; margin-top: 10px; }
+        .price-card { background: #111; padding: 15px; border-radius: 8px; border-left: 4px solid #d4af37; }
+        .input-dark { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; width: 100px; }
+    </style>
+</head>
+<body class="dev-bg">
+
+    <div id="devAuth" class="auth-overlay">
+        <div style="text-align: center;">
+            <h2 style="margin-bottom: 20px; color: #d4af37;">SYSTEM AUTHENTICATION</h2>
+            <input type="password" id="lockWord" placeholder="Enter Lock Word" style="padding: 15px; width: 300px; border-radius: 8px; border: none;">
+            <button onclick="verifyDev()" class="dev-btn btn-extend" style="display: block; width: 330px; margin-top: 10px;">AUTHORIZE</button>
+        </div>
+    </div>
+
+    <div class="dev-container" id="devPanel" style="display: none;">
+        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1 style="color: #d4af37;">TINUBU <span style="font-weight: 300; font-size: 1rem; color: #888;">System Control v1.0</span></h1>
+            <div id="liveClock" style="font-family: monospace; font-size: 1.2rem;"></div>
+        </header>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- System Status -->
+            <div class="dev-card">
+                <h3>SYSTEM STATUS</h3>
+                <div style="margin-top: 20px;">
+                    <p>Status: <span id="masterStatusPill" class="status-pill">CHECKING...</span></p>
+                    <p style="margin-top: 15px;">Expiry: <span id="expiryDisplay" style="color: #2dce89;">--:--:--</span></p>
+                    <p style="margin-top: 5px;">Countdown: <span id="countdownDisplay" style="color: #d4af37;">--</span></p>
+                </div>
+            </div>
+
+            <!-- Master Locks -->
+            <div class="dev-card">
+                <h3>MASTER OVERRIDES</h3>
+                <div style="margin-top: 15px;">
+                    <button onclick="toggleSystemLock(true)" class="dev-btn btn-lock">FORCE LOCK SITE</button>
+                    <button onclick="toggleSystemLock(false)" class="dev-btn btn-unlock">RESTORE SITE</button>
+                    <hr style="margin: 15px 0; border: 0; border-top: 1px solid #333;">
+                    <button onclick="toggleAdminLock(true)" class="dev-btn btn-lock">LOCK ADMIN</button>
+                    <button onclick="toggleAdminLock(false)" class="dev-btn btn-unlock">UNLOCK ADMIN</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pricing Master Control -->
+        <div class="dev-card">
+            <h3><i class="fas fa-tags"></i> SUBSCRIPTION PRICING CONTROL</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px;">
+                <div class="price-card">
+                    <label>Monthly Rate (₦)</label><br>
+                    <input type="number" id="devMonthlyPrice" class="input-dark" placeholder="0">
+                </div>
+                <div class="price-card">
+                    <label>Yearly Rate (₦)</label><br>
+                    <input type="number" id="devYearlyPrice" class="input-dark" placeholder="0">
+                </div>
+                <div class="price-card">
+                    <label>Grace Period (Days)</label><br>
+                    <input type="number" id="devGraceDays" class="input-dark" placeholder="0">
+                </div>
+            </div>
+            <button onclick="savePricingConfig()" class="dev-btn btn-extend" style="width: 100%; margin-top: 20px;">
+                PUBLISH NEW PRICING INSTANTLY
+            </button>
+        </div>
+
+        <!-- Subscription Control -->
+        <div class="dev-card">
+            <h3>SUBSCRIPTION LIFECYCLE MANAGEMENT</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                <div>
+                    <label>Manually Set Expiry Date:</label>
+                    <input type="datetime-local" id="manualExpiry">
+                    <button onclick="setManualExpiry()" class="dev-btn btn-extend" style="width: 100%; margin: 10px 0;">OVERRIDE EXPIRY</button>
+                </div>
+                <div>
+                    <label>Test Simulations:</label>
+                    <div style="margin-top: 10px;">
+                        <button onclick="simulateSub(1/1440)" class="dev-btn btn-outline" style="color: white; border: 1px solid #444;">SIMULATE 1 MIN</button>
+                        <button onclick="simulateSub(30)" class="dev-btn btn-extend">ADD 30 DAYS</button>
+                        <button onclick="forceExpire()" class="dev-btn btn-lock">FORCE INSTANT EXPIRE</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit Logs -->
+        <div class="dev-card">
+            <h3>SYSTEM AUDIT LOGS</h3>
+            <div id="devLogs" class="log-list">
+                <!-- Logs injected here -->
+            </div>
+        </div>
+
+        <footer class="story-footer" style="margin-top: 50px; border-top: 1px solid #333; padding-top: 40px;">
+            <p>© 2026 Auracious Sip Drink. All Rights Reserved.</p>
+            <p style="margin-top: 5px; font-style: italic;">Where every sip nourishes life’s beauty.</p>
+            
+            <div class="dev-credit" style="margin-top: 40px; opacity: 0.6;">
+                <p>Developed by:</p>
+                <p><strong>APPOWERTECHNOLOGY</strong></p>
+                <p>apppowertechnology@gmail.com</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="tinubu.js"></script>
+</body>
+</html>

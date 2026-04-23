@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Management | AUDACIOUS SIP</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://js.paystack.co/v1/inline.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="admin-body">
+
+    <!-- Login Security Screen -->
+    <section id="loginSection" class="admin-login-overlay">
+        <div class="admin-card login-box">
+            <h2 class="brand-logo" style="text-align: center; margin-bottom: 20px;">AURACIOUS SIP</h2>
+            <p style="text-align: center; margin-bottom: 20px; color: #666;">Private Management Access</p>
+            <div class="form-group">
+                <input type="password" id="adminPin" placeholder="Enter Admin PIN" autofocus>
+            </div>
+            <button class="btn btn-primary" style="width: 100%;" onclick="authAdmin()">Access Dashboard</button>
+            <p id="loginError" style="color: #d93025; font-size: 0.85rem; margin-top: 15px; text-align: center; display: none;">Invalid PIN. Access Denied.</p>
+        </div>
+    </section>
+
+    <!-- Main Dashboard SPA Layout -->
+    <div id="adminDashboard" class="admin-layout" style="display: none;">
+        <aside class="sidebar">
+            <div class="sidebar-brand">AURACIOUS SIP</div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-link active" onclick="switchTab('dashboard')"><i class="fas fa-chart-line"></i> Dashboard</a>
+                <a href="#" class="nav-link" onclick="switchTab('products')"><i class="fas fa-box"></i> Products</a>
+                <a href="#" class="nav-link" onclick="switchTab('uploaded-assets')"><i class="fas fa-images"></i> Assets</a>
+                <a href="#" class="nav-link" onclick="switchTab('order-tracking')"><i class="fas fa-truck-fast"></i> Tracking</a>
+                <a href="#" class="nav-link" onclick="switchTab('categories')"><i class="fas fa-tags"></i> Categories</a>
+                <a href="#" class="nav-link" onclick="switchTab('orders')"><i class="fas fa-file-invoice"></i> Orders</a>
+                <a href="#" class="nav-link" onclick="switchTab('transactions')"><i class="fas fa-credit-card"></i> Payments</a>
+                <a href="#" class="nav-link" onclick="switchTab('analytics')"><i class="fas fa-calculator"></i> Profits</a>
+                <a href="#" class="nav-link" onclick="switchTab('subscription')"><i class="fas fa-key"></i> License</a>
+                <a href="#" class="nav-link" onclick="switchTab('settings')"><i class="fas fa-cog"></i> Settings</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button class="btn-logout" onclick="location.reload()">Logout</button>
+            </div>
+        </aside>
+
+        <main class="content-area">
+            <header class="topbar">
+                <h2 id="currentTabTitle">Dashboard</h2>
+                <div class="topbar-right">
+                    <span class="status-indicator live">● Live Status</span>
+                    <span id="currentDateTime"></span>
+                    <div class="admin-profile">AS</div>
+                </div>
+            </header>
+
+            <!-- Tabs Sections -->
+            <section id="tab-dashboard" class="tab-content active">
+                <div class="analytics-grid">
+                    <div class="admin-card chart-container">
+                        <h3>Sales Performance</h3>
+                        <canvas id="salesChart"></canvas>
+                    </div>
+                    <div class="traffic-stats">
+                        <div class="stat-card highlight">
+                            <span class="stat-label">Active Users Now</span>
+                            <h3 id="activeUsers">0</h3>
+                            <div class="pulse"></div>
+                        </div>
+                        <div class="stat-card" style="border-bottom-color: var(--accent);">
+                            <span class="stat-label">Monthly Revenue</span>
+                            <h3 id="monthlyRev">₦0</h3>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-label">Today's Traffic</span>
+                            <h3 id="todayVisits">0</h3>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-label">Today's Sales</span>
+                            <h3 id="todaySales">₦0</h3>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-products" class="tab-content">
+                <div class="admin-card">
+                    <h3>Inventory List</h3>
+                    <form id="addProductForm" class="inline-form">
+                        <input type="text" id="prodName" placeholder="Name" required>
+                        <input type="number" id="prodPrice" placeholder="Price" required>
+                        <select id="prodCat" required></select>
+                        <input type="text" id="prodUnit" placeholder="Unit" required>
+                        <input type="number" id="prodStock" placeholder="Stock" required>
+                        <input type="file" id="prodImage" required>
+                        <button type="submit" class="btn btn-primary">Add Product</button>
+                    </form>
+                    <div id="adminProductList" class="data-table-container"></div>
+                </div>
+            </section>
+
+            <section id="tab-uploaded-assets" class="tab-content">
+                <div class="admin-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+                        <h3>Product Media Library</h3>
+                        <div class="filter-group" style="margin-bottom: 0;">
+                            <div class="search-bar" style="width: 250px; display: flex;">
+                                <input type="text" id="assetSearch" placeholder="Search assets..." oninput="loadUploadedAssets()">
+                            </div>
+                            <select id="assetCatFilter" onchange="loadUploadedAssets()" style="width: 150px; padding: 8px;">
+                                <option value="All">All Categories</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="assetGrid" class="asset-grid"></div>
+                </div>
+            </section>
+
+            <section id="tab-categories" class="tab-content">
+                <div class="admin-card">
+                    <h3>Manage Categories</h3>
+                    <form id="addCategoryForm" class="inline-form" style="max-width: 400px;">
+                        <input type="text" id="catName" placeholder="Category Name" required>
+                        <button type="submit" class="btn btn-primary">Add Category</button>
+                    </form>
+                    <div id="categoryList" class="category-grid"></div>
+                </div>
+            </section>
+
+            <section id="tab-transactions" class="tab-content">
+                <div class="admin-card">
+                    <div class="table-header">
+                        <h3>Payment Activity</h3>
+                        <div class="filter-group">
+                            <button onclick="loadTransactions('All')" class="btn btn-sm btn-outline active">All</button>
+                            <button onclick="loadTransactions('Successful')" class="btn btn-sm btn-outline">Successful</button>
+                            <button onclick="loadTransactions('Failed')" class="btn btn-sm btn-outline">Failed</button>
+                            <button onclick="loadTransactions('Canceled')" class="btn btn-sm btn-outline">Canceled</button>
+                        </div>
+                    </div>
+                    <table class="premium-table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Reference</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="tab-analytics" class="tab-content">
+                <div class="admin-card">
+                    <h3>System Metrics</h3>
+                    <div class="stats-grid" id="analyticsGrid">
+                        <!-- Stats generated by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-subscription" class="tab-content">
+                <div class="admin-card">
+                    <div class="subscription-header">
+                        <h3>System Expiry Control</h3>
+                        <span id="subStatusBadge" class="badge">Checking...</span>
+                        <button class="btn btn-secondary" onclick="manualRefreshSubscription()">
+                            <i class="fas fa-sync"></i> Refresh Subscription
+                        </button>
+                    </div>
+                    
+                    <div class="timer-card" style="position: relative;">
+                        <!-- Subscription Inactive Overlay -->
+                        <div id="subInactiveOverlay" style="display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.95); z-index: 5; flex-direction: column; align-items: center; justify-content: center; border-radius: var(--radius);">
+                            <i class="fas fa-exclamation-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 15px;"></i>
+                            <h3 style="color: var(--primary);">SUBSCRIPTION INACTIVE</h3>
+                            <p style="color: var(--text-muted);">Please renew your license to restore platform access.</p>
+                        </div>
+
+                        <div id="countdownTimer" class="timer-value">-- : -- : --</div>
+                        <div class="sub-progress-container">
+                            <div id="subProgressBar" class="sub-progress-bar" style="width: 100%;"></div>
+                        </div>
+                        <p>Remaining platform access time until auto-lock.</p>
+                        <p id="expiryFullDate" style="font-size: 0.9rem; color: #666; margin-top: 10px;"></p>
+                    </div>
+
+                    <div class="admin-card pricing-overview-section">
+                        <div class="current-rate-header">
+                            <span class="rate-label">Current Subscription Rate</span>
+                            <h2 id="currentMonthlyRateDisplay" class="text-success">₦100 / Month</h2>
+                        </div>
+                        
+                        <div class="pricing-tier-grid">
+                            <div class="tier-card">
+                                <span class="tier-months">1 Month</span>
+                                <h4 id="tier-1-price">₦100</h4>
+                            </div>
+                            <div class="tier-card">
+                                <span class="tier-months">3 Months</span>
+                                <h4 id="tier-3-price">₦300</h4>
+                            </div>
+                            <div class="tier-card">
+                                <span class="tier-months">6 Months</span>
+                                <h4 id="tier-6-price">₦600</h4>
+                            </div>
+                            <div class="tier-card premium">
+                                <span class="tier-months">12 Months</span>
+                                <h4 id="tier-12-price">₦1,200</h4>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="renewal-engine admin-card">
+                        <h4>Renew Subscription</h4>
+                        <div class="plan-selector-grid">
+                            <div class="form-group">
+                                <label>Select Duration</label>
+                                <select id="subPlanSelect" onchange="calculateSubPrice()">
+                                    <option value="1">1 Month</option>
+                                    <option value="12">1 Year (Save More)</option>
+                                    <option value="custom">Custom Months</option>
+                                </select>
+                            </div>
+                            <div id="customMonthWrapper" class="form-group" style="display:none">
+                                <label>Enter Months</label>
+                                <input type="number" id="customMonths" min="1" placeholder="e.g. 5" oninput="calculateSubPrice()">
+                            </div>
+                        </div>
+
+                        <div class="price-display-card">
+                            <span class="label">Total Amount:</span>
+                            <span id="subTotalPrice" class="amount">₦0</span>
+                        </div>
+
+                        <button class="btn btn-primary" style="width:100%" id="renewBtn" onclick="initiatePaystackSubscriptionPayment()">
+                            Renew Platform Access (Paystack)
+                        </button>
+                    </div>
+
+                    <div id="subDays" style="display:none"></div>
+                </div>
+
+                <div class="admin-card">
+                    <h3>Subscription History</h3>
+                    <table class="premium-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Amount</th>
+                                <th>Duration</th>
+                                <th>Reference</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subHistoryTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="tab-settings" class="tab-content">
+                <div class="admin-card">
+                    <h3>Social Media Links</h3>
+                    <p style="margin-bottom: 25px; color: #666;">Manage the social icons displayed on the public website footer and story page.</p>
+                    
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-facebook" style="color:#1877F2"></i></span>
+                        <input type="text" id="setting-facebook" placeholder="Facebook URL (e.g. https://facebook.com/auracioussip)">
+                    </div>
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-instagram" style="color:#E4405F"></i></span>
+                        <input type="text" id="setting-instagram" placeholder="Instagram URL">
+                    </div>
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-tiktok" style="color:#000"></i></span>
+                        <input type="text" id="setting-tiktok" placeholder="TikTok URL">
+                    </div>
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-whatsapp" style="color:#25D366"></i></span>
+                        <input type="text" id="setting-whatsapp" placeholder="WhatsApp Link (e.g. https://wa.me/234...)">
+                    </div>
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-x-twitter" style="color:#000"></i></span>
+                        <input type="text" id="setting-twitter" placeholder="X / Twitter URL">
+                    </div>
+                    <div class="social-setting-row">
+                        <span class="social-platform-icon"><i class="fab fa-youtube" style="color:#FF0000"></i></span>
+                        <input type="text" id="setting-youtube" placeholder="YouTube Channel URL">
+                    </div>
+
+                    <button class="btn btn-primary btn-save-settings" style="margin-top: 20px;" onclick="saveSocialLinks()">Save Social Media Links</button>
+                </div>
+            </section>
+
+            <section id="tab-order-tracking" class="tab-content">
+                <div class="admin-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <h3>Order Tracking & Delivery</h3>
+                        <div class="search-bar" style="width: 300px; display: flex;">
+                            <input type="text" id="orderSearchInput" placeholder="Search Ticket, Name, or Phone..." oninput="filterTrackingOrders()">
+                        </div>
+                    </div>
+                    <table class="premium-table">
+                        <thead>
+                            <tr>
+                                <th>Ticket #</th>
+                                <th>Customer</th>
+                                <th>Amount</th>
+                                <th>Payment</th>
+                                <th>Order Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trackingTableBody">
+                            <!-- Injected by admin.js -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="tab-orders" class="tab-content">
+                <div class="admin-card">
+                    <h3>Customer Orders</h3>
+                    <div id="adminOrderList" class="data-table-container"></div>
+                </div>
+            </section>
+
+            <footer class="story-footer" style="margin-top: 50px;">
+                <p>© 2026 AURACIOUS SIP. All Rights Reserved.</p>
+                <p style="margin-top: 5px; font-style: italic;">Where every sip nourishes life’s beauty.</p>
+                
+                <div class="dev-credit" style="margin-top: 40px; opacity: 0.6;">
+                    <p>Developed by:</p>
+                    <p><strong>APPOWERTECHNOLOGY</strong></p>
+                    <p>apppowertechnology@gmail.com</p>
+                </div>
+            </footer>
+
+        </main>
+    </div>
+
+    <!-- Edit Product Modal -->
+    <div id="editProductModal" class="modal">
+        <div class="modal-content">
+            <h3>Edit Product Details</h3>
+            <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 0.9rem;">Modify product information and assets.</p>
+            <input type="hidden" id="editProdId">
+            <div class="form-group">
+                <label>Product Name</label>
+                <input type="text" id="editProdName" placeholder="Product Name" required>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-group">
+                    <label>Price (₦)</label>
+                    <input type="number" id="editProdPrice" required>
+                </div>
+                <div class="form-group">
+                    <label>Stock</label>
+                    <input type="number" id="editProdStock" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Category</label>
+                <select id="editProdCat" required></select>
+            </div>
+            <div class="form-group">
+                <label>Replace Image (Optional)</label>
+                <input type="file" id="editProdImage" accept="image/*">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="saveEditBtn" class="btn btn-primary" onclick="saveProductEdit()" style="flex:1">Save Changes</button>
+                <button class="btn btn-outline" onclick="closeEditModal()" style="flex:1">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>

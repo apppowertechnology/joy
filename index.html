@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURACIOUS SIP | Premium Wellness & Luxury Store</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://checkout.flutterwave.com/v3.js"></script>
+    <script src="https://js.paystack.co/v1/inline.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+    <!-- Subscription Lock Screen -->
+    <div id="lock-screen" style="display: none;">
+        <div class="lock-card">
+            <div class="lock-icon"><i class="fas fa-shield-halved"></i></div>
+            <h1 id="lock-title">AURACIOUS SIP</h1>
+            <p id="lock-msg" style="margin-bottom: 25px;">System Security Active.</p>
+            <div id="renew-btn-wrapper" style="display: none;">
+                <button class="btn btn-primary" onclick="window.location.href='admin.html#subscription'">Renew Subscription Now</button>
+                <p style="font-size: 0.8rem; margin-top: 15px; opacity: 0.7;">Instant recovery upon payment.</p>
+            </div>
+            <div style="margin-top: 30px; font-size: 0.85rem;">
+                <p>Support: <a href="mailto:apppowertechnology@gmail.com" style="color: var(--accent);">apppowertechnology@gmail.com</a></p>
+            </div>
+        </div>
+    </div>
+
+    <header>
+        <nav class="container nav-wrapper">
+            <a href="index.html" class="brand-logo">
+                <span class="logo-accent">AURACIOUS</span> SIP
+            </a>
+            <div class="search-bar">
+                <i class="fas fa-search search-icon"></i>
+                <input type="text" id="productSearch" placeholder="Search our premium collection...">
+            </div>
+            <div class="header-actions">
+                <div class="cart-icon-wrapper" onclick="openCart()">
+                    <span class="cart-trigger"><i class="fas fa-shopping-bag"></i></span>
+                    <span id="cartBadge" class="cart-badge">0</span>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="toggleTrackingView(true)" style="margin-left: 15px;">Track Order</button>
+            </div>
+        </nav>
+    </header>
+
+    <div id="homeView">
+        <section class="hero">
+            <div class="hero-content">
+                <span class="hero-badge">ESTABLISHED 2025</span>
+                <h1 class="hero-title">The Art of <span class="text-gradient">Business</span></h1>
+                <div class="hero-btns">
+                    <a href="#shop" class="btn btn-primary">Shop Collection</a>
+                    <a href="#" class="btn btn-outline" data-nav="story">Our Story</a>
+                </div>
+            </div>
+        </section>
+
+        <main id="shop" class="container">
+            <div class="categories-nav" id="categoryNav">
+                <button class="cat-pill active" data-cat="All">All Items</button>
+                <button class="cat-pill" data-cat="Drinks">Premium Drinks</button>
+                <button class="cat-pill" data-cat="Clothes">Apparel</button>
+                <button class="cat-pill" data-cat="Accessories">Accessories</button>
+                <button class="cat-pill" data-cat="Shoes">Footwear</button>
+            </div>
+
+            <div class="product-grid" id="productContainer">
+                <!-- Products injected by app.js -->
+            </div>
+        </main>
+
+        <footer class="story-footer">
+            <p>© 2026 AURACIOUS SIP. All Rights Reserved.</p>
+            <p style="margin-top: 5px; font-style: italic;">Where every sip nourishes life’s beauty.</p>
+            
+            <div class="social-links-display"></div>
+
+            <div class="dev-credit" style="margin-top: 40px; opacity: 0.6;">
+                <p>Developed by:</p>
+                <p><strong>APPOWERTECHNOLOGY</strong></p>
+                <p>apppowertechnology@gmail.com</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Our Story Section -->
+    <section id="ourStoryView" class="story-section">
+        <div class="container">
+            <div class="story-content">
+                <!-- Header -->
+                <header class="story-header">
+                    <h2>Our Story</h2>
+                    <div class="header-accent"></div>
+                </header>
+
+                <!-- Brand Narrative -->
+                <div class="story-text">
+                    <p>AURACIOUS SIP was born from a passion for healthy living and a deep belief that wellness should be simple, enjoyable, and part of everyday life.</p>
+                    <p>It began with a vision — to create a natural drink that does more than refresh the body, but also supports <span class="narrative-highlight">balance, energy, and overall well-being</span>.</p>
+                    <p>Every bottle of AURACIOUS SIP represents care, intention, and dedication to quality. It is carefully crafted using naturally nourishing ingredients designed to promote a healthier lifestyle without stress or complication.</p>
+                    <p>This is not just a drink brand. <br><strong>This is a wellness journey in every sip.</strong></p>
+                    <p>AURACIOUS SIP exists to inspire people to choose better, live healthier, and enjoy the beauty of natural nourishment.</p>
+                </div>
+
+                <!-- Purpose & Belief -->
+                <div class="purpose-belief-grid">
+                    <div class="info-block">
+                        <h3>Our Purpose</h3>
+                        <ul>
+                        <li><i class="fas fa-leaf"></i> Promoting healthier lifestyle choices</li>
+                        <li><i class="fas fa-heart"></i> Making wellness simple and enjoyable</li>
+                        <li><i class="fas fa-seedling"></i> Using naturally nourishing ingredients</li>
+                        <li><i class="fas fa-check-circle"></i> Creating drinks with care and consistency</li>
+                        <li><i class="fas fa-sun"></i> Inspiring balance and vitality in everyday life</li>
+                        </ul>
+                    </div>
+                    <div class="info-block">
+                        <h3>Our Belief</h3>
+                        <div class="belief-quote">
+                            "We believe that healthy living should not feel difficult. It should feel natural, enjoyable, and rewarding."
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Section -->
+                <div class="contact-box">
+                    <h3>Contact Us</h3>
+                    <p>We would love to hear from you.</p>
+                    <div class="contact-links">
+                        <a href="https://wa.me/2348128602352" target="_blank" class="contact-btn">
+                            <i class="fab fa-whatsapp"></i> Chat with us on WhatsApp
+                        </a>
+                        <a href="mailto:orjijoy66@gmail.com" class="contact-btn">
+                            <i class="far fa-envelope"></i> orjijoy66@gmail.com
+                        </a>
+                    </div>
+                    <div class="social-links-display" style="margin-top: 20px;"></div>
+                </div>
+
+                <!-- Footer -->
+                <footer class="story-footer">
+                    <p>© 2026 AURACIOUS SIP. All Rights Reserved.</p>
+                    <p style="margin-top: 5px; font-style: italic;">Where every sip nourishes life’s beauty.</p>
+                    
+                    <div class="dev-credit" style="margin-top: 40px; opacity: 0.6;">
+                        <p>Developed by:</p>
+                        <p><strong>APPOWERTECHNOLOGY</strong></p>
+                        <p>apppowertechnology@gmail.com</p>
+                    </div>
+
+                    <div style="margin-top: 30px;">
+                        <button class="btn btn-outline btn-sm" onclick="toggleOurStory(false)">
+                            Back to Shop
+                        </button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    </section>
+
+    <!-- Order Tracking View (Public) -->
+    <section id="trackingView" class="story-section">
+        <div class="container">
+            <div class="story-content" style="max-width: 600px;">
+                <header class="story-header">
+                    <h2>Track Your Order</h2>
+                    <div class="header-accent"></div>
+                </header>
+                <div class="admin-card">
+                    <p style="margin-bottom: 20px;">Enter your unique ticket number to see your delivery status.</p>
+                    <div class="form-group">
+                        <input type="text" id="publicTrackingId" placeholder="e.g. AUR-123456" style="text-align: center; font-size: 1.2rem; font-weight: 700;">
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%;" onclick="searchPublicOrder()">Check Status</button>
+                </div>
+                <div id="publicTrackingResult" style="margin-top: 30px;"></div>
+                <div style="margin-top: 30px;">
+                    <button class="btn btn-outline btn-sm" onclick="toggleTrackingView(false)">Back to Shop</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Order Success & Receipt Modal -->
+    <div class="modal" id="orderSuccessModal">
+        <div class="modal-content" style="max-width: 600px; padding: 0; overflow: hidden;">
+            <div style="background: var(--primary); color: white; padding: 30px; text-align: center;">
+                <div style="font-size: 3rem; margin-bottom: 10px;">✅</div>
+                <h2>Payment Successful</h2>
+                <p>Thank you for choosing AURACIOUS SIP</p>
+            </div>
+            <div id="receiptContent" style="padding: 30px;">
+                <!-- Receipt content injected by JS -->
+            </div>
+            <div class="modal-footer" style="padding: 20px; background: var(--bg-soft); display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <button class="btn btn-primary" onclick="downloadReceiptPDF()">Download PDF</button>
+                <button class="btn btn-outline" onclick="shareReceipt()">Share Receipt</button>
+                <button class="btn btn-outline" onclick="copyTicketNumber()" id="copyTicketBtn">Copy Ticket #</button>
+                <button class="btn btn-outline" onclick="location.reload()">Finish & Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cart Modal -->
+    <div class="modal" id="cartModal">
+        <div class="modal-content cart-modal-content">
+            <h2 style="margin-bottom: 20px;">Your Premium Selection</h2>
+            <div id="cartItemsContainer" class="cart-items-list">
+                <!-- Cart items injected here -->
+            </div>
+            <div class="cart-summary">
+                <div class="summary-line"><span>Subtotal:</span> <span id="cartSubtotal">₦0</span></div>
+                <div class="summary-line total"><span>Total:</span> <span id="cartTotal">₦0</span></div>
+            </div>
+            <div class="cart-actions">
+                <button class="btn btn-outline" onclick="closeCart()" style="width: 100%;">Continue Shopping</button>
+                <button class="btn btn-primary" id="checkoutBtn" onclick="openCheckout()" style="width: 100%;">Proceed to Checkout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Checkout Modal (Personal Details) -->
+    <div class="modal" id="orderModal">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 10px;">Delivery Details</h2>
+            <p style="margin-bottom: 20px; color: #666; font-size: 0.9rem;">Please provide your shipping information.</p>
+            <form id="orderForm">
+                <div class="form-group">
+                    <input type="text" id="custName" placeholder="Recipient Full Name" required>
+                </div>
+                <div class="form-group">
+                    <input type="tel" id="custPhone" placeholder="Phone Number (e.g. 08012345678)" pattern="[0-9+]{10,14}" required>
+                </div>
+                <div class="form-group">
+                    <textarea id="custAddress" placeholder="Full Delivery Address" rows="3" required></textarea>
+                </div>
+                <div class="form-group">
+                    <textarea id="orderNote" placeholder="Additional Notes (Optional)" rows="2"></textarea>
+                </div>
+                <div class="order-total-preview" style="margin-bottom: 15px; font-weight: 700; text-align: right;">
+                    Final Amount: <span id="checkoutTotal">₦0</span>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Proceed to Payment</button>
+                <button type="button" class="btn" onclick="closeModal()" style="width: 100%; margin-top: 10px; background: #eee;">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
