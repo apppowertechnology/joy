@@ -20,16 +20,26 @@ function handleInitialRouting() {
     const path = window.location.pathname;
     const urlParams = new URLSearchParams(window.location.search);
     
-    if (path === '/story') toggleOurStory(true);
-    if (path === '/tracking') toggleTrackingView(true);
+    if (path === '/story' || urlParams.get('view') === 'story') toggleOurStory(true);
+    if (path === '/tracking' || urlParams.get('view') === 'tracking') toggleTrackingView(true);
 
     // CAPTURE REFERENCE: Check search params OR pathname (for Vercel rewrites)
     let ref = urlParams.get('reference') || urlParams.get('trxref');
-    if (!ref && path.startsWith('/AS-')) {
-        ref = path.substring(1); // Extracts "AS-XXXX" from "/AS-XXXX"
+    
+    // Broaden detection: if path is not a known route, treat as possible ref
+    const knownRoutes = ['/', '/index.html', '/story', '/tracking', '/admin.html', '/tinubu.html'];
+    if (!ref && path.length > 5 && !knownRoutes.some(r => path.endsWith(r))) {
+        ref = path.split('/').filter(Boolean).pop(); 
     }
 
-    if (ref && ref.includes('AS-')) {
+    if (ref) {
+        // Check if this was a subscription recovery
+        if (sessionStorage.getItem('pending_sub_months')) {
+            handleSubscriptionRecovery(ref);
+            window.history.replaceState({}, document.title, "/");
+            return;
+        }
+
         // Recover lost form data from session if this was a redirect
         const savedData = sessionStorage.getItem('pending_checkout_data');
         const orderData = savedData ? JSON.parse(savedData) : null;
@@ -38,6 +48,25 @@ function handleInitialRouting() {
         
         // Clean the URL for a premium look
         window.history.replaceState({}, document.title, "/");
+    }
+}
+
+async function handleSubscriptionRecovery(ref) {
+    const months = sessionStorage.getItem('pending_sub_months');
+    const amount = sessionStorage.getItem('pending_sub_amount');
+    
+    setProcessingState(true, "Verifying Subscription...");
+    try {
+        await fetchWithRetry(`${API_URL}/subscription`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ reference: ref, months: parseInt(months), amount: parseFloat(amount) })
+        });
+        sessionStorage.removeItem('pending_sub_months');
+        location.reload();
+    } catch (err) {
+        setProcessingState(false);
+        showToast("Subscription verification failed. Please contact support.", "error");
     }
 }
 
@@ -197,12 +226,17 @@ async function initiatePaystackSubscriptionPaymentFromLockScreen() {
 
     const ref = 'AS-LOCK-SUB-' + Date.now();
 
+    // Persist sub details for recovery if redirected
+    sessionStorage.setItem('pending_sub_months', months);
+    sessionStorage.setItem('pending_sub_amount', total);
+
     const handler = PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY,
         email: 'admin@auracioussip.com', // Or a generic contact email
         amount: total * 100, // Paystack expects amount in kobo
         currency: 'NGN',
         ref: ref,
+        callback_url: window.location.origin, // Force return to index.html for recovery
         callback: function(response) {
             setProcessingState(true, "Verifying Subscription...");
             fetchWithRetry(`${API_URL}/subscription`, {
@@ -432,6 +466,7 @@ function processPayment() {
 
     const customerInfo = {
         customerName: document.getElementById('custName').value,
+        email: document.getElementById('custEmail').value,
         phone: document.getElementById('custPhone').value,
         address: document.getElementById('custAddress').value,
         note: document.getElementById('orderNote').value
@@ -463,10 +498,11 @@ function processPayment() {
 
     const handler = PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY,
-        email: `customer_${Date.now()}@auracioussip.com`,
+        email: customerInfo.email,
         amount: amount * 100, // Kobo
         currency: 'NGN',
         ref: ref,
+        callback_url: window.location.origin + "/index.html", // Explicit file path to prevent 404
         callback: function(response) {
             // Strictly handle via AJAX, do not allow browser redirect
             verifyOrderOnBackend(response.reference);
@@ -484,6 +520,7 @@ async function verifyOrderOnBackend(ref, recoveredData = null) {
     // Use recovered data (from redirect) or live form data (from popup)
     const orderData = recoveredData || {
         customerName: document.getElementById('custName')?.value,
+        email: document.getElementById('custEmail')?.value,
         phone: document.getElementById('custPhone')?.value,
         address: document.getElementById('custAddress')?.value,
         note: document.getElementById('orderNote')?.value,
@@ -536,73 +573,117 @@ async function verifyOrderOnBackend(ref, recoveredData = null) {
 }
 
 function showOrderReceipt(order) {
+    if (!order) return;
     const container = document.getElementById('receiptContent');
-    document.getElementById('orderModal').style.display = 'none';
-    document.getElementById('orderSuccessModal').style.display = 'flex';
+    const modal = document.getElementById('orderSuccessModal');
+    
+    // Hide other modals
+    document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+    modal.style.display = 'flex';
 
     const itemsHtml = order.items.map(i => {
         const subtotal = i.price * i.quantity;
         return `
             <div class="receipt-row">
                 <div style="text-align: left;">
-                    <span style="display:block; font-weight:600;">${i.name}</span>
+                    <span style="display:block; font-weight:600; color: var(--primary);">${i.name}</span>
                     <span style="font-size:0.75rem; color:#666;">${i.category || ''} ${i.unit ? '| ' + i.unit : ''}</span>
                 </div>
                 <div style="text-align: right;">
-                    <span style="font-size:0.85rem; color:#666;">${i.quantity} x ₦${Number(i.price).toLocaleString()}</span>
+                    <span style="font-size:0.85rem; color:#888;">${i.quantity} x ₦${Number(i.price).toLocaleString()}</span>
                     <span style="display:block; font-weight:600;">₦${subtotal.toLocaleString()}</span>
                 </div>
             </div>
         `;
     }).join('');
 
-    container.innerHTML = `
-        <div class="receipt-card premium-receipt">
+    const receiptHtml = `
+        <div class="receipt-card premium-receipt" style="animation: slideUp 0.4s ease-out;">
             <div class="receipt-header">
                 <div class="success-icon-circle"><i class="fas fa-check"></i></div>
-                <h3>AURACIOUS SIP</h3>
-                <p class="receipt-subtitle">Payment Successful Receipt</p>
+                <h2 style="font-family: 'Playfair Display'; letter-spacing: 1px;">AURACIOUS SIP</h2>
+                <div class="badge badge-successful" style="margin-top: 10px; font-size: 0.8rem;">PAYMENT VERIFIED</div>
             </div>
             
             <div class="tracking-section">
-                <span class="label">Tracking Ticket Number</span>
+                <span class="label">OFFICIAL TRACKING TICKET</span>
                 <div class="ticket-box">${order.ticketNumber}</div>
             </div>
 
             <div class="receipt-details">
                 <div class="detail-group">
-                    <h4>Customer Details</h4>
-                    <p><strong>Name:</strong> ${order.customerName}</p>
-                    <p><strong>Phone:</strong> ${order.phone}</p>
-                    <p style="font-size:0.85rem"><strong>Address:</strong> ${order.address}</p>
+                    <h4 class="receipt-section-title"><i class="fas fa-user"></i> Recipient Info</h4>
+                    <div class="info-grid">
+                        <span>Customer:</span> <strong>${order.customerName}</strong>
+                        <span>Phone:</span> <strong>${order.phone}</strong>
+                        <span>Address:</span> <strong style="font-size: 0.8rem;">${order.address}</strong>
+                    </div>
                 </div>
 
                 <div class="detail-group">
-                    <h4>Order Summary</h4>
+                    <h4 class="receipt-section-title"><i class="fas fa-shopping-cart"></i> Order Summary</h4>
                     <div class="receipt-items-list">
                         ${itemsHtml}
                     </div>
                     <div class="receipt-row total">
-                        <span>Total Paid</span>
-                        <span>₦${order.amount.toLocaleString()}</span>
+                        <span style="font-size: 1.1rem;">Total Verified Paid</span>
+                        <span style="font-size: 1.2rem; color: var(--primary-light);">₦${order.amount.toLocaleString()}</span>
                     </div>
                 </div>
 
-                <div class="detail-group">
-                    <h4>Payment Information</h4>
-                    <p><strong>Status:</strong> <span class="text-success">Successful</span></p>
-                    <p><strong>Method:</strong> Paystack</p>
-                    <p><strong>Reference:</strong> ${order.paymentReference}</p>
-                    <p><strong>Date/Time:</strong> ${new Date(order.createdAt).toLocaleString()}</p>
+                <div class="detail-group" style="background: #f9f9f9; padding: 15px; border-radius: 8px;">
+                    <h4 class="receipt-section-title"><i class="fas fa-credit-card"></i> Transaction Log</h4>
+                    <div class="info-grid" style="font-size: 0.8rem;">
+                        <span>Method:</span> <strong>Paystack Secure</strong>
+                        <span>Reference:</span> <strong>${order.paymentReference}</strong>
+                        <span>Date:</span> <strong>${new Date(order.createdAt).toLocaleString()}</strong>
+                        <span>Status:</span> <strong class="text-success">VERIFIED</strong>
+                    </div>
                 </div>
             </div>
 
             <div class="receipt-footer">
-                <p class="thank-you-msg">Thank you for choosing AURACIOUS SIP.</p>
-                <p>We have received your order successfully.</p>
+                <p class="thank-you-msg">Thank you for your premium selection.</p>
+                <p style="font-size: 0.75rem; color: #888;">Please present your ticket number to our delivery partners.</p>
             </div>
         </div>
     `;
+
+    container.innerHTML = receiptHtml;
+}
+
+function goToTrackingFromReceipt() {
+    const ticket = lastOrder ? lastOrder.ticketNumber : '';
+    document.getElementById('orderSuccessModal').style.display = 'none';
+    toggleTrackingView(true);
+    if (ticket) {
+        document.getElementById('publicTrackingId').value = ticket;
+        searchPublicOrder();
+    }
+}
+
+function printReceipt() {
+    if (!lastOrder) return;
+    const content = document.getElementById('receiptContent').innerHTML;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+            <head>
+                <title>Receipt - ${lastOrder.ticketNumber}</title>
+                <link rel="stylesheet" href="/style.css">
+                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+                <style>
+                    body { background: white !important; color: black !important; padding: 40px; font-family: 'Montserrat', sans-serif; }
+                    .receipt-card { box-shadow: none !important; border: 1px solid #eee; margin: 0 auto; width: 100%; max-width: 600px; animation: none !important; }
+                </style>
+            </head>
+            <body>
+                <div class="modal-content" style="box-shadow:none; border:none; padding:0; background:none;">${content}</div>
+                <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); };</script>
+            </body>
+        </html>
+    `);
+    printWindow.document.close();
 }
 
 async function downloadReceiptPDF() {
@@ -720,4 +801,64 @@ function searchPublicOrder() {
             `;
         });
     });
+}
+
+async function manualVerifyPayment() {
+    const refInput = document.getElementById('manualRefInput');
+    const ref = refInput ? refInput.value.trim() : null;
+    if (!ref) return showToast("Please enter the payment reference from your bank alert/Paystack", "error");
+
+    setProcessingState(true, "Checking transaction records...");
+    
+    try {
+        // 1. DATABASE CHECK: Search completed orders (already processed)
+        const orderSnap = await db.ref('orders').orderByChild('paymentReference').equalTo(ref).once('value');
+        if (orderSnap.exists()) {
+            let existingOrder;
+            orderSnap.forEach(c => { existingOrder = c.val(); });
+            
+            lastOrder = existingOrder;
+            setProcessingState(false);
+            showOrderReceipt(existingOrder);
+            if (refInput) refInput.value = '';
+            showToast("Order record found and recovered.");
+            return;
+        }
+
+        // 2. LEDGER CHECK: Did we initiate this transaction? 
+        // This validates the reference against our own records before Paystack
+        const snapshot = await db.ref(`transactions/${ref}`).once('value');
+        const transData = snapshot.val();
+
+        if (!transData) {
+            setProcessingState(false);
+            return showToast("Invalid reference number. This payment was not initiated on this platform.", "error");
+        }
+
+        // 3. CONTEXT VALIDATION: Ensure it's not a subscription token
+        if (!transData.items && transData.months) {
+            setProcessingState(false);
+            return showToast("This reference belongs to a system license, not a product order.", "error");
+        }
+
+        // 4. FINAL VERIFICATION: Confirmed in DB, now sync with Gateway
+        const statusMsg = transData.status === 'Successful' ? "Finalizing order details..." : "Synchronizing payment status...";
+        setProcessingState(true, statusMsg);
+
+        const orderData = {
+            customerName: transData.customerName,
+            email: transData.email,
+            phone: transData.phone,
+            address: transData.address,
+            note: transData.note || "",
+            items: transData.items
+        };
+
+        // Trigger the professional success flow
+        await verifyOrderOnBackend(ref, orderData);
+        if (refInput) refInput.value = '';
+    } catch (e) {
+        setProcessingState(false);
+        showToast(e.message || "Unable to sync payment. Please try again or check your connection.", "error");
+    }
 }

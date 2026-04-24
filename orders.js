@@ -4,17 +4,34 @@ const { admin, db, logVerification, verifyPaystack, processOrder } = require('./
 module.exports = async (req, res) => {
     // Handle CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST') return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
 
-    const { reference, orderData } = req.body;
+    // Support both POST (body) and GET (query) for resilience
+    const reference = req.body?.reference || req.query?.reference;
+    let orderData = req.body?.orderData;
 
-    // Validation Shield: Prevent saving incomplete orders
+    // Recovery Logic: If orderData is missing (common in GET/Redirects), 
+    // try to reconstruct it from the pending transaction in DB
+    if (!orderData && reference) {
+        const transSnap = await db.ref(`transactions/${reference}`).once('value');
+        if (transSnap.exists()) {
+            const trans = transSnap.val();
+            orderData = {
+                customerName: trans.customerName,
+                email: trans.email,
+                phone: trans.phone,
+                address: trans.address,
+                note: trans.note || "",
+                items: trans.items
+            };
+        }
+    }
+
     if (!orderData || !orderData.customerName || !orderData.items || orderData.items.length === 0) {
-        return res.status(400).json({ success: false, message: 'Incomplete order data received' });
+        return res.status(400).json({ success: false, message: `Incomplete order data for ref: ${reference || 'None'}` });
     }
 
     try {

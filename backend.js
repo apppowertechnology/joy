@@ -120,10 +120,11 @@ const processOrder = async (reference, orderData, amountPaid, isWebhook = false)
         throw new Error('Stock update conflict: One or more items became unavailable.');
     }
 
-    const ticketNumber = 'AUR-' + Math.floor(100000 + Math.random() * 900000);
+    const ticketNumber = `AUS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const newOrder = {
         customerName: orderData.customerName,
+        email: orderData.email,
         phone: orderData.phone,
         address: orderData.address,
         note: orderData.note,

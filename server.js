@@ -101,7 +101,7 @@ app.post('/api/orders', async (req, res) => {
                 return res.status(400).json({ success: false, message: 'Stock error: One or more items became unavailable during processing.' });
             }
 
-            const ticketNumber = 'AUR-' + Math.floor(100000 + Math.random() * 900000);
+            const ticketNumber = `AUS-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
             const newOrderRef = db.ref('orders').push();
             const newOrder = {
                 ...orderData,

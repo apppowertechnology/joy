@@ -9,7 +9,7 @@ module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST') return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+    if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Webhooks must be POST requests.' });
 
     // 1. Verify Paystack Webhook Signature (Security Critical)
     const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(JSON.stringify(req.body)).digest('hex');
@@ -49,6 +49,7 @@ module.exports = async (req, res) => {
             if (originalTransData.items) { // This indicates an order
                 const orderData = {
                     customerName: originalTransData.customerName,
+                    email: originalTransData.email,
                     phone: originalTransData.phone,
                     address: originalTransData.address,
                     note: originalTransData.note,

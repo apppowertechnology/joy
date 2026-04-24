@@ -181,6 +181,16 @@
                     <button class="btn btn-primary" style="width: 100%;" onclick="searchPublicOrder()">Check Status</button>
                 </div>
                 <div id="publicTrackingResult" style="margin-top: 30px;"></div>
+
+                <div class="admin-card" style="margin-top: 30px; border-top: 2px dashed #eee; padding-top: 25px;">
+                    <h4 style="margin-bottom: 10px;">Missing your ticket?</h4>
+                    <p style="margin-bottom: 15px; color: #666; font-size: 0.9rem;">If you completed payment but didn't receive a ticket, enter your payment reference below to verify and generate your receipt.</p>
+                    <div class="form-group">
+                        <input type="text" id="manualRefInput" placeholder="Payment Reference (e.g. AS-XXXX)" style="text-align: center; font-family: monospace;">
+                    </div>
+                    <button class="btn btn-outline" style="width: 100%;" onclick="manualVerifyPayment()">Verify & Recover Order</button>
+                </div>
+
                 <div style="margin-top: 30px;">
                     <button class="btn btn-outline btn-sm" onclick="toggleTrackingView(false)">Back to Shop</button>
                 </div>
@@ -199,11 +209,13 @@
             <div id="receiptContent" style="padding: 30px;">
                 <!-- Receipt content injected by JS -->
             </div>
-            <div class="modal-footer" style="padding: 20px; background: var(--bg-soft); display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="modal-footer" style="padding: 20px; background: var(--bg-soft); display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
                 <button class="btn btn-primary" onclick="downloadReceiptPDF()">Download PDF</button>
+                <button class="btn btn-outline" onclick="printReceipt()"><i class="fas fa-print"></i> Print Receipt</button>
                 <button class="btn btn-outline" onclick="shareReceipt()">Share Receipt</button>
-                <button class="btn btn-outline" onclick="copyTicketNumber()" id="copyTicketBtn">Copy Ticket #</button>
-                <button class="btn btn-outline" onclick="location.reload()">Finish & Close</button>
+                <button class="btn btn-outline" onclick="goToTrackingFromReceipt()">Track Order</button>
+                <button class="btn btn-outline" onclick="copyTicketNumber()" id="copyTicketBtn">Copy Ticket</button>
+                <button class="btn btn-outline" onclick="location.reload()" style="grid-column: 1 / -1;">Continue Shopping</button>
             </div>
         </div>
     </div>
@@ -234,6 +246,9 @@
             <form id="orderForm">
                 <div class="form-group">
                     <input type="text" id="custName" placeholder="Recipient Full Name" required>
+                </div>
+                <div class="form-group">
+                    <input type="email" id="custEmail" placeholder="Email Address" required>
                 </div>
                 <div class="form-group">
                     <input type="tel" id="custPhone" placeholder="Phone Number (e.g. 08012345678)" pattern="[0-9+]{10,14}" required>

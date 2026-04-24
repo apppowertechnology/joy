@@ -67,6 +67,29 @@ function initDashboard() {
     subscriptionTicker = setInterval(updateSubscriptionTimer, 1000);
 }
 
+async function checkAdminRedirectRecovery() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const ref = urlParams.get('reference') || urlParams.get('trxref');
+    
+    if (ref && sessionStorage.getItem('pending_sub_months')) {
+        const months = sessionStorage.getItem('pending_sub_months');
+        const amount = sessionStorage.getItem('pending_sub_amount');
+        
+        try {
+            await fetchWithRetry(`${API_URL}/subscription`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ reference: ref, months: parseInt(months), amount: parseFloat(amount) })
+            });
+            sessionStorage.removeItem('pending_sub_months');
+            window.history.replaceState({}, document.title, window.location.pathname);
+            location.reload();
+        } catch (err) {
+            showToast("Admin sub recovery failed: " + err.message, "error");
+        }
+    }
+}
+
 function setupSubscriptionListener() {
     // Prevent listener stacking
     db.ref('subscription').off('value');
@@ -430,7 +453,7 @@ function loadTransactions(filter = 'All') {
                 <tr>
                     <td>
                         <strong>${o.customerName}</strong><br>
-                        <small>${o.phone}</small>
+                        <small>${o.phone} | ${o.email || 'N/A'}</small>
                     </td>
                     <td>
                         ₦${o.amount.toLocaleString()}<br>
@@ -496,7 +519,7 @@ function loadOrderRecovery() {
                     orphanedCount++;
                     html += `
                         <tr>
-                            <td><strong>${t.customerName || 'Unknown'}</strong><br><small>${t.phone || 'N/A'}</small></td>
+                            <td><strong>${t.customerName || 'Unknown'}</strong><br><small>${t.phone || 'N/A'} | ${t.email || ''}</small></td>
                             <td>₦${(t.amount || 0).toLocaleString()}</td>
                             <td><code>${ref}</code></td>
                             <td>${new Date(t.createdAt || t.updatedAt).toLocaleString()}</td>
@@ -661,7 +684,7 @@ function loadOrders() {
             html = `
                 <tr class="tracking-row" data-search="${(o.ticketNumber + o.customerName + (o.phone||'')).toLowerCase()}">
                     <td><strong>${o.ticketNumber}</strong></td>
-                    <td>${o.customerName}<br><small>${o.phone}</small></td>
+                    <td>${o.customerName}<br><small>${o.phone} | ${o.email || ''}</small></td>
                     <td>₦${o.amount.toLocaleString()}</td>
                     <td><span class="badge badge-successful">${o.paymentStatus}</span></td>
                     <td><span class="status-pill status-${statusClass}">${o.orderStatus}</span></td>
@@ -775,6 +798,10 @@ async function initiatePaystackSubscriptionPayment() {
     // Generate a unique reference for Paystack
     const ref = 'AS-SUB-' + Date.now();
 
+    // Save for recovery
+    sessionStorage.setItem('pending_sub_months', months);
+    sessionStorage.setItem('pending_sub_amount', total);
+
     // Log Pending Transaction to Firebase
     const transData = {
         customerName: "Auracious Sip Admin", // Or dynamically fetch admin name
@@ -794,6 +821,7 @@ async function initiatePaystackSubscriptionPayment() {
             amount: total * 100, // Paystack expects amount in kobo
             currency: 'NGN',
             ref: ref,
+            callback_url: window.location.href, // Ensure we return to this specific admin tab
             callback: function(response) {
                 const btn = document.getElementById('renewBtn');
                 btn.innerText = "Verifying...";

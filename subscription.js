@@ -4,7 +4,7 @@ const { admin, db, verifyPaystack, processSubscription } = require('./backend');
 module.exports = async (req, res) => {
     // Handle CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
@@ -24,11 +24,32 @@ module.exports = async (req, res) => {
         }
     }
 
-    if (req.method !== 'POST') return res.status(405).json({ success: false });
+    if (req.method !== 'POST' && req.method !== 'GET') {
+        return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+    }
 
-    const { reference, months, amount: frontendAmount } = req.body;
+    // Support both POST and GET
+    const reference = req.body?.reference || req.query?.reference;
+    let months = req.body?.months || req.query?.months;
+    let frontendAmount = req.body?.amount || req.query?.amount;
+
+    if (!reference) return res.status(400).json({ success: false, message: "Missing reference" });
 
     try {
+        // Recover subscription details from DB if missing from request
+        if (!months) {
+            const transSnap = await db.ref(`transactions/${reference}`).once('value');
+            if (transSnap.exists()) {
+                const trans = transSnap.val();
+                months = trans.months;
+                frontendAmount = trans.amount;
+            }
+        }
+
+        if (!months) {
+            return res.status(400).json({ success: false, message: "Subscription duration details missing." });
+        }
+
         // 1. Idempotency Check
         const historySnap = await db.ref('subscription/history').orderByChild('reference').equalTo(reference).once('value');
         if (historySnap.exists()) {
