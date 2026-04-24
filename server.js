@@ -32,22 +32,76 @@ const db = admin.database();
  */
 app.post('/api/orders', async (req, res) => {
     const { reference, orderData } = req.body;
-    if (!reference || !orderData) return res.status(400).json({ status: 'failed', message: 'Missing transaction data' });
+    if (!reference || !orderData) return res.status(400).json({ success: false, status: 'failed', message: 'Missing transaction data' });
 
     try {
+        // 1. Idempotency Check: Prevent duplicate orders for the same reference
+        const existingOrderSnap = await db.ref('orders').orderByChild('paymentReference').equalTo(reference).once('value');
+        if (existingOrderSnap.exists()) {
+            let existingOrder;
+            existingOrderSnap.forEach(c => { existingOrder = c.val(); });
+            return res.json({ success: true, status: 'success', order: existingOrder, message: 'Payment already verified' });
+        }
+
+        // 2. Paystack Verification
         const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
             headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
         });
 
-        if (response.data.data.status === 'success') {
-            const ticketNumber = 'AUR-' + Math.floor(100000 + Math.random() * 900000);
-            const totalAmount = orderData.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        const data = response.data.data;
+        if (data.status === 'success') {
+            const paidAmount = data.amount / 100; // Kobo to Naira
 
-            // Securely save order to DB
+            // 3. Security Check: Validate Amount with DB Lookup
+            const productRequests = orderData.items.map(item => db.ref(`products/${item.id}`).once('value'));
+            const productSnapshots = await Promise.all(productRequests);
+            
+            let expectedAmount = 0;
+            const verifiedItems = [];
+
+            for (let i = 0; i < productSnapshots.length; i++) {
+                const product = productSnapshots[i].val();
+                const originalItem = orderData.items[i];
+
+                if (!product) {
+                    return res.status(400).json({ success: false, message: `Validation failed: Product ${originalItem.name} not found.` });
+                }
+
+                // Pre-check stock levels
+                if ((product.stock || 0) < originalItem.quantity) {
+                    return res.status(400).json({ success: false, message: `Insufficient stock for ${originalItem.name}.` });
+                }
+
+                const currentPrice = Number(product.price);
+                expectedAmount += currentPrice * originalItem.quantity;
+                verifiedItems.push({ ...originalItem, price: currentPrice });
+            }
+
+            if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+                return res.status(400).json({ success: false, message: 'Amount mismatch detected' });
+            }
+
+            // 4. Atomic Stock Deduction
+            const stockDeductions = verifiedItems.map(item => {
+                return db.ref(`products/${item.id}/stock`).transaction(currentStock => {
+                    if (currentStock !== null && currentStock >= item.quantity) {
+                        return currentStock - item.quantity;
+                    }
+                    return; // Abort transaction if stock became insufficient
+                });
+            });
+
+            const deductionResults = await Promise.all(stockDeductions);
+            if (deductionResults.some(r => !r.committed)) {
+                return res.status(400).json({ success: false, message: 'Stock error: One or more items became unavailable during processing.' });
+            }
+
+            const ticketNumber = 'AUR-' + Math.floor(100000 + Math.random() * 900000);
             const newOrderRef = db.ref('orders').push();
             const newOrder = {
                 ...orderData,
-                amount: totalAmount,
+                items: verifiedItems, // Ensure verified prices are stored in history
+                amount: paidAmount,
                 ticketNumber: ticketNumber,
                 orderStatus: 'Pending',
                 paymentStatus: 'Paid',
@@ -57,26 +111,44 @@ app.post('/api/orders', async (req, res) => {
             await newOrderRef.set(newOrder);
 
             // Update Transaction Ledger
-            await db.ref(`transactions/${reference}`).update({ status: 'Successful' });
+            await db.ref(`transactions/${reference}`).update({ status: 'Successful', amount: paidAmount, updatedAt: Date.now() });
 
-            // Update Analytics
-            await db.ref('analytics/totalRevenue').transaction(c => (c || 0) + totalAmount);
+            // Update Analytics via transactions
+            await db.ref('analytics/totalRevenue').transaction(c => (c || 0) + paidAmount);
             await db.ref('analytics/successfulPayments').transaction(c => (c || 0) + 1);
 
-            res.json({ status: 'success', orderId: newOrderRef.key, order: newOrder });
+            res.json({ success: true, status: 'success', order: newOrder, message: 'Payment verified successfully' });
         } else {
-            res.status(400).json({ status: 'failed', message: 'Payment verification failed' });
+            res.status(400).json({ success: false, message: 'Payment verification failed on gateway' });
         }
     } catch (error) {
-        console.error("Order Verification Error:", error.message);
-        res.status(500).json({ status: 'error', message: 'Internal verification error' });
+        res.status(500).json({ success: false, message: 'Internal server error during verification' });
     }
 });
 
+/**
+ * Update Subscription Pricing (Tinubu Panel)
+ */
+app.patch('/api/subscription', async (req, res) => {
+    const { monthlyPrice, grace } = req.body;
+    await db.ref('subscriptionPricing').update({ 
+        monthlyPrice, 
+        grace, 
+        updatedAt: Date.now() 
+    });
+    res.json({ success: true });
+});
+
 app.post('/api/subscription', async (req, res) => {
-    const { reference, months, amount: frontendAmount } = req.body; // frontendAmount for initial validation
+    const { reference, months, amount: frontendAmount } = req.body;
 
     try {
+        // Idempotency Check
+        const historySnap = await db.ref('subscription/history').orderByChild('reference').equalTo(reference).once('value');
+        if (historySnap.exists()) {
+            return res.json({ success: true, status: 'success', message: 'Subscription already updated' });
+        }
+
         const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
             headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
         });
@@ -84,11 +156,8 @@ app.post('/api/subscription', async (req, res) => {
         if (response.data.data.status === 'success') {
             const actualAmountPaid = response.data.data.amount / 100; // Convert kobo to naira
 
-            // Basic security check: Ensure the amount paid matches the expected amount
-            // This is a crucial step to prevent tampering with the amount on the frontend.
-            // You might want to fetch the current pricing from DB here and calculate expected amount.
             if (frontendAmount && actualAmountPaid < frontendAmount) {
-                return res.status(400).json({ status: 'failed', message: 'Amount mismatch detected.' });
+                return res.status(400).json({ success: false, message: 'Amount mismatch detected' });
             }
 
             const subRef = db.ref('subscription');
@@ -121,13 +190,13 @@ app.post('/api/subscription', async (req, res) => {
             const salesRef = db.ref('analytics/monthlySales');
             await salesRef.transaction(current => (current || 0) + actualAmountPaid);
 
-            res.json({ status: 'success', expiresAt: newExpiry });
+            res.json({ success: true, status: 'success', expiresAt: newExpiry });
         } else {
-            res.status(400).json({ status: 'failed' });
+            res.status(400).json({ success: false, message: 'Payment failed' });
         }
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 

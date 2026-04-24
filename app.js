@@ -133,6 +133,20 @@ async function checkSubscription() {
     });
 }
 
+const setProcessingState = (isProcessing, message = "Processing...") => {
+    let overlay = document.getElementById('processingOverlay');
+    if (!overlay && isProcessing) {
+        overlay = document.createElement('div');
+        overlay.id = 'processingOverlay';
+        overlay.className = 'modal'; // Reuse modal styles for backdrop
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `<div class="modal-content" style="text-align:center;"><div class="success-icon-circle blinking"><i class="fas fa-sync-alt"></i></div><h3 id="procMsg">${message}</h3><p>Please do not close this window.</p></div>`;
+        document.body.appendChild(overlay);
+    }
+    if (overlay) overlay.style.display = isProcessing ? 'flex' : 'none';
+    if (overlay && message) document.getElementById('procMsg').innerText = message;
+};
+
 async function initiatePaystackSubscriptionPaymentFromLockScreen() {
     // Assuming a default 1-month renewal from the lock screen for simplicity
     // Or you could add options to the lock screen for different durations
@@ -171,13 +185,17 @@ async function initiatePaystackSubscriptionPaymentFromLockScreen() {
         currency: 'NGN',
         ref: ref,
         callback: function(response) {
-            fetch(`${API_URL}/subscription`, {
+            setProcessingState(true, "Verifying Subscription...");
+            fetchWithRetry(`${API_URL}/subscription`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ reference: response.reference, months: months, amount: total })
             })
             .then(() => location.reload())
-            .catch(err => showToast("Verification failed. Please contact support.", "error"));
+            .catch(err => {
+                setProcessingState(false);
+                showToast("Verification failed. Please contact support.", "error");
+            });
         },
         onClose: () => { if (renewBtn) { renewBtn.disabled = false; renewBtn.innerText = "Renew Subscription"; } }
     });
@@ -201,6 +219,7 @@ function renderProducts(products) {
             <div class="img-container">
                 <img src="${p.image}" class="product-image" loading="lazy" alt="${p.name}">
                 ${p.stock < 1 ? '<div class="card-overlay"><span class="badge-sold">Sold Out</span></div>' : ''}
+                ${p.stock > 0 && p.stock < 5 ? `<span class="badge badge-pending" style="position:absolute; bottom:10px; right:10px; z-index:10; background:var(--orange); color:white;">Only ${p.stock} left</span>` : ''}
                 <div class="card-category-tag">${p.category}</div>
             </div>
             <div class="product-info">
@@ -209,10 +228,11 @@ function renderProducts(products) {
                 <div class="product-footer">
                     <span class="product-price">₦${Number(p.price).toLocaleString()}</span>
                     <div class="card-controls">
-                        <input type="number" value="1" min="1" max="${p.stock}" class="qty-input" id="qty-${p.id}">
+                        <input type="number" value="${p.stock < 1 ? 0 : 1}" min="${p.stock < 1 ? 0 : 1}" max="${p.stock}" 
+                            class="qty-input" id="qty-${p.id}" ${p.stock < 1 ? 'disabled' : ''}>
                         <button class="btn btn-primary btn-sm" ${p.stock < 1 ? 'disabled' : ''} 
                             onclick="addToCart('${p.id}')">
-                            ${p.stock < 1 ? 'Empty' : 'Add'}
+                            ${p.stock < 1 ? 'Sold Out' : 'Add'}
                         </button>
                     </div>
                 </div>
@@ -223,12 +243,22 @@ function renderProducts(products) {
 
 function addToCart(productId) {
     const product = allProducts.find(p => p.id === productId);
+    if (!product || (product.stock || 0) < 1) {
+        return showToast("Sorry, this item is out of stock.", "error");
+    }
+
     const qtyInput = document.getElementById(`qty-${productId}`);
     const quantity = parseInt(qtyInput.value);
 
-    if (quantity < 1) return;
+    if (isNaN(quantity) || quantity < 1) return;
 
     const existingItem = cart.find(item => item.id === productId);
+    const currentInCart = existingItem ? existingItem.quantity : 0;
+
+    if (currentInCart + quantity > product.stock) {
+        return showToast(`Only ${product.stock} available in total.`, "error");
+    }
+
     if (existingItem) {
         existingItem.quantity += quantity;
     } else {
@@ -252,21 +282,30 @@ function updateCartBadge() {
 
 function openCart() {
     const container = document.getElementById('cartItemsContainer');
+    let hasStockError = false;
+
     if (cart.length === 0) {
         container.innerHTML = '<p style="text-align:center; padding: 20px;">Your cart is empty.</p>';
         document.getElementById('checkoutBtn').disabled = true;
     } else {
-        container.innerHTML = cart.map(item => `
-            <div class="cart-item">
-                <img src="${item.image}" alt="${item.name}">
-                <div class="cart-item-info">
-                    <h4>${item.name}</h4>
-                    <p>₦${Number(item.price).toLocaleString()} x ${item.quantity}</p>
+        container.innerHTML = cart.map(item => {
+            const product = allProducts.find(p => p.id === item.id);
+            const isInsufficient = !product || product.stock < item.quantity;
+            if (isInsufficient) hasStockError = true;
+
+            return `
+                <div class="cart-item" style="${isInsufficient ? 'border-left: 4px solid var(--danger);' : ''}">
+                    <img src="${item.image}" alt="${item.name}">
+                    <div class="cart-item-info">
+                        <h4>${item.name}</h4>
+                        <p>₦${Number(item.price).toLocaleString()} x ${item.quantity}</p>
+                        ${isInsufficient ? `<p class="text-danger" style="font-size:0.75rem; font-weight:700;">Insufficient Stock: Only ${product ? product.stock : 0} left</p>` : ''}
+                    </div>
+                    <button class="remove-item" onclick="removeFromCart('${item.id}')">✕</button>
                 </div>
-                <button class="remove-item" onclick="removeFromCart('${item.id}')">✕</button>
-            </div>
-        `).join('');
-        document.getElementById('checkoutBtn').disabled = false;
+            `;
+        }).join('');
+        document.getElementById('checkoutBtn').disabled = hasStockError;
     }
 
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -420,7 +459,7 @@ async function verifyOrderOnBackend(ref) {
         }))
     };
 
-    showToast("Verifying payment, please wait...", "info");
+    setProcessingState(true, "Verifying Payment...");
 
     try {
         const result = await fetchWithRetry(`${API_URL}/orders`, {
@@ -428,14 +467,16 @@ async function verifyOrderOnBackend(ref) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: ref, orderData })
         });
-        if (result.success || result.status === 'success') {
+        if (result.success) {
             lastOrder = result.order;
             localStorage.removeItem('auracious_cart');
             cart = [];
             updateCartBadge();
             showOrderReceipt(result.order);
+            setProcessingState(false);
         }
     } catch (e) {
+        setProcessingState(false);
         showToast(e.message || 'Verification failed. Contact support.', 'error');
         const payBtn = document.querySelector('#orderForm button[type="submit"]');
         if (payBtn) {

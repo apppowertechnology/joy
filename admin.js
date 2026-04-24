@@ -701,14 +701,19 @@ async function initiatePaystackSubscriptionPayment() {
             currency: 'NGN',
             ref: ref,
             callback: function(response) {
-                showToast("Verifying subscription...", "info");
+                const btn = document.getElementById('renewBtn');
+                btn.innerText = "Verifying...";
                 fetchWithRetry(`${API_URL}/subscription`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ reference: response.reference, months: months, amount: total })
                 })
                 .then(() => location.reload())
-                .catch(err => showToast("Verification failed.", "error"));
+                .catch(err => {
+                    showToast("Verification failed: " + err.message, "error");
+                    btn.disabled = false;
+                    btn.innerText = "Retry Verification";
+                });
             },
             onClose: () => {
                 db.ref(`transactions/${ref}`).update({ status: 'Canceled' });
