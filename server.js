@@ -14,13 +14,16 @@ app.use(cors());
 
 // Initialize Firebase Admin (Using credentials locally)
 try {
-    const serviceAccount = require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: FIREBASE_URL
-    });
+    if (!admin.apps.length) {
+        // Parse the service account from an environment variable string
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: FIREBASE_URL
+        });
+    }
 } catch (e) {
-    console.error("Firebase Admin initialization failed. Check your service account key.");
+    console.error("Firebase Admin initialization failed:", e.message);
 }
 const db = admin.database();
 
@@ -129,4 +132,8 @@ app.post('/api/subscription', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`AURACIOUS SIP Backend on port ${PORT}`));
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => console.log(`AURACIOUS SIP Backend on port ${PORT}`));
+}
+
+module.exports = app;
