@@ -33,12 +33,23 @@ const showToast = (msg, type = 'success') => {
 async function fetchWithRetry(url, options, retries = 3, backoff = 1000) {
     try {
         const res = await fetch(url, options);
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.message || `Server error: ${res.status}`);
-        return result;
+        if (!res.ok) {
+            // Read as text first to handle HTML error pages gracefully
+            const errorText = await res.text();
+            let errorMessage = `Server error: ${res.status}`;
+            try {
+                const errorJson = JSON.parse(errorText);
+                errorMessage = errorJson.message || errorMessage;
+            } catch (e) {
+                errorMessage = errorText.substring(0, 100) || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+        return await res.json();
     } catch (err) {
-        if (retries > 0 && err.message.includes('fetch')) {
-            console.warn(`Retrying verification... (${retries} left)`);
+        const isNetworkError = err instanceof TypeError || err.message.includes('fetch') || err.message.includes('network');
+        if (retries > 0 && isNetworkError) {
+            console.warn(`Retrying... (${retries} left)`);
             await new Promise(resolve => setTimeout(resolve, backoff));
             return fetchWithRetry(url, options, retries - 1, backoff * 2);
         }

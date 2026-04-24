@@ -27,7 +27,7 @@ const db = admin.database();
 /**
  * Verify Product Order Payment
  */
-app.post('/verify-order', async (req, res) => {
+app.post('/api/orders', async (req, res) => {
     const { reference, orderData } = req.body;
     if (!reference || !orderData) return res.status(400).json({ status: 'failed', message: 'Missing transaction data' });
 
@@ -70,7 +70,7 @@ app.post('/verify-order', async (req, res) => {
     }
 });
 
-app.post('/verify-subscription', async (req, res) => {
+app.post('/api/subscription', async (req, res) => {
     const { reference, months, amount: frontendAmount } = req.body; // frontendAmount for initial validation
 
     try {
