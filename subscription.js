@@ -1,6 +1,17 @@
 // api/subscription.js - Handle Subscription Verification & Tinubu Overrides
-const { db, admin, PAYSTACK_SECRET_KEY } = require('./config');
+const admin = require('firebase-admin');
 const axios = require('axios');
+
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+
+// Initialize Firebase Admin for Serverless
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
+        databaseURL: process.env.FIREBASE_DATABASE_URL
+    });
+}
+const db = admin.database();
 
 module.exports = async (req, res) => {
     // Handle CORS
@@ -23,10 +34,16 @@ module.exports = async (req, res) => {
 
     if (req.method !== 'POST') return res.status(405).json({ success: false });
 
-    const { reference, months } = req.body;
+    const { reference, months, amount: frontendAmount } = req.body;
 
     try {
-        // 1. Verify Payment
+        // 1. Idempotency Check
+        const historySnap = await db.ref('subscription/history').orderByChild('reference').equalTo(reference).once('value');
+        if (historySnap.exists()) {
+            return res.status(200).json({ success: true, message: 'Subscription already updated' });
+        }
+
+        // 2. Verify Payment
         const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
             headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
         });
@@ -34,7 +51,11 @@ module.exports = async (req, res) => {
         if (response.data.data.status === 'success') {
             const actualAmountPaid = response.data.data.amount / 100;
             
-            // 2. Calculate New Expiry
+            if (frontendAmount && actualAmountPaid < frontendAmount) {
+                return res.status(400).json({ success: false, message: 'Amount mismatch' });
+            }
+
+            // 3. Calculate New Expiry
             const subRef = db.ref('subscription');
             const snapshot = await subRef.once('value');
             const currentSub = snapshot.val() || { expiresAt: Date.now() };
@@ -42,7 +63,7 @@ module.exports = async (req, res) => {
             const baseDate = (currentSub.expiresAt && currentSub.expiresAt > Date.now()) ? currentSub.expiresAt : Date.now();
             const newExpiry = baseDate + (months * 30 * 24 * 60 * 60 * 1000);
 
-            // 3. Update Database
+            // 4. Update Database
             await subRef.update({
                 active: true,
                 expiresAt: newExpiry,
@@ -51,7 +72,7 @@ module.exports = async (req, res) => {
                 updatedAt: admin.database.ServerValue.TIMESTAMP
             });
 
-            // 4. Log History
+            // 5. Log History
             await db.ref('subscription/history').push({
                 amount: actualAmountPaid,
                 months: months,
@@ -60,11 +81,11 @@ module.exports = async (req, res) => {
                 status: 'Successful'
             });
 
-            return res.status(200).json({ 
-                success: true, 
-                status: 'success', 
-                expiresAt: newExpiry 
-            });
+            // 6. Log Analytics
+            const salesRef = db.ref('analytics/monthlySales');
+            await salesRef.transaction(current => (current || 0) + actualAmountPaid);
+
+            return res.status(200).json({ success: true, expiresAt: newExpiry });
         } else {
             return res.status(400).json({ success: false, message: 'Verification failed' });
         }

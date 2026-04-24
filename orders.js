@@ -1,6 +1,17 @@
 // api/orders.js - Handle Order Creation and Verification
-const { db, admin, PAYSTACK_SECRET_KEY } = require('./config');
+const admin = require('firebase-admin');
 const axios = require('axios');
+
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+
+// Initialize Firebase Admin for Serverless
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
+        databaseURL: process.env.FIREBASE_DATABASE_URL
+    });
+}
+const db = admin.database();
 
 module.exports = async (req, res) => {
     // Handle CORS
@@ -14,21 +25,73 @@ module.exports = async (req, res) => {
     const { reference, orderData } = req.body;
 
     try {
-        // 1. Verify Payment with Paystack
+        // 1. Idempotency Check
+        const existingOrderSnap = await db.ref('orders').orderByChild('paymentReference').equalTo(reference).once('value');
+        if (existingOrderSnap.exists()) {
+            let existingOrder;
+            existingOrderSnap.forEach(c => { existingOrder = c.val(); });
+            return res.status(200).json({ success: true, order: existingOrder, message: 'Already verified' });
+        }
+
+        // 2. Verify Payment with Paystack
         const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
             headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
         });
 
-        if (response.data.data.status !== 'success') {
+        const data = response.data.data;
+        if (data.status !== 'success') {
             return res.status(400).json({ success: false, message: 'Payment verification failed' });
         }
 
-        const paidAmount = response.data.data.amount / 100;
+        const paidAmount = data.amount / 100;
+
+        // 3. Security: DB Price Lookup & Stock Pre-check
+        const productRequests = orderData.items.map(item => db.ref(`products/${item.id}`).once('value'));
+        const productSnapshots = await Promise.all(productRequests);
+        
+        let expectedAmount = 0;
+        const verifiedItems = [];
+
+        for (let i = 0; i < productSnapshots.length; i++) {
+            const product = productSnapshots[i].val();
+            const originalItem = orderData.items[i];
+
+            if (!product || (product.stock || 0) < originalItem.quantity) {
+                return res.status(400).json({ success: false, message: 'Product unavailable or out of stock' });
+            }
+
+            const currentPrice = Number(product.price);
+            expectedAmount += currentPrice * originalItem.quantity;
+            verifiedItems.push({ ...originalItem, price: currentPrice });
+        }
+
+        if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+            return res.status(400).json({ success: false, message: 'Amount mismatch' });
+        }
+
+        // 4. Atomic Stock Deduction
+        const stockDeductions = verifiedItems.map(item => {
+            return db.ref(`products/${item.id}/stock`).transaction(currentStock => {
+                if (currentStock !== null && currentStock >= item.quantity) {
+                    return currentStock - item.quantity;
+                }
+                return;
+            });
+        });
+
+        const deductionResults = await Promise.all(stockDeductions);
+        if (deductionResults.some(r => !r.committed)) {
+            return res.status(400).json({ success: false, message: 'Stock update conflict' });
+        }
+
         const ticketNumber = 'AUR-' + Math.floor(100000 + Math.random() * 900000);
 
-        // 2. Prepare Order Object
         const newOrder = {
-            ...orderData,
+            customerName: orderData.customerName,
+            phone: orderData.phone,
+            address: orderData.address,
+            note: orderData.note,
+            items: verifiedItems,
             amount: paidAmount,
             ticketNumber: ticketNumber,
             orderStatus: 'Pending',
@@ -37,20 +100,14 @@ module.exports = async (req, res) => {
             createdAt: Date.now()
         };
 
-        // 3. Save to Firebase via Admin SDK
         const orderRef = db.ref('orders').push();
         await orderRef.set(newOrder);
 
-        // 4. Update Analytics & Ledger
-        await db.ref(`transactions/${reference}`).update({ status: 'Successful' });
+        await db.ref(`transactions/${reference}`).update({ status: 'Successful', amount: paidAmount, updatedAt: Date.now() });
         await db.ref('analytics/totalRevenue').transaction(c => (c || 0) + paidAmount);
         await db.ref('analytics/successfulPayments').transaction(c => (c || 0) + 1);
 
-        return res.status(200).json({ 
-            success: true, 
-            status: 'success', // Kept for frontend compatibility
-            order: newOrder 
-        });
+        return res.status(200).json({ success: true, order: newOrder });
 
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

@@ -27,6 +27,11 @@ try {
 }
 const db = admin.database();
 
+// Health Check Route (To debug 404s)
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'online', message: 'AURACIOUS SIP API is reachable' });
+});
+
 /**
  * Verify Product Order Payment
  */
@@ -201,8 +206,10 @@ app.post('/api/subscription', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => console.log(`AURACIOUS SIP Backend on port ${PORT}`));
-}
+
+// Start server immediately (Unless required as a module for serverless)
+const server = app.listen(PORT, () => {
+    console.log(`AURACIOUS SIP Backend active on: http://localhost:${PORT}`);
+}).on('error', (err) => console.error("Server startup error:", err));
 
 module.exports = app;
