@@ -159,12 +159,14 @@ async function initiatePaystackSubscriptionPaymentFromLockScreen() {
         amount: total * 100, // Paystack expects amount in kobo
         currency: 'NGN',
         ref: ref,
-        callback: (response) => {
-            fetch(`${API_URL}/verify-subscription`, {
+        callback: function(response) {
+            fetch(`${API_URL}/subscription`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ reference: response.reference, months: months, amount: total })
-            }).then(() => location.reload()).catch(err => showToast("Verification failed. Please contact support.", "error"));
+            })
+            .then(() => location.reload())
+            .catch(err => showToast("Verification failed. Please contact support.", "error"));
         },
         onClose: () => { if (renewBtn) { renewBtn.disabled = false; renewBtn.innerText = "Renew Subscription"; } }
     });
@@ -379,7 +381,7 @@ function processPayment() {
         amount: amount * 100, // Kobo
         currency: 'NGN',
         ref: ref,
-        callback: (response) => {
+        callback: function(response) {
             verifyOrderOnBackend(response.reference);
         },
         onClose: () => {
@@ -415,7 +417,7 @@ async function verifyOrderOnBackend(ref) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: ref, orderData })
         });
-        if (result.status === 'success') {
+        if (result.success || result.status === 'success') {
             lastOrder = result.order;
             localStorage.removeItem('auracious_cart');
             cart = [];

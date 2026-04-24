@@ -700,20 +700,15 @@ async function initiatePaystackSubscriptionPayment() {
             amount: total * 100, // Paystack expects amount in kobo
             currency: 'NGN',
             ref: ref,
-            callback: async (response) => {
+            callback: function(response) {
                 showToast("Verifying subscription...", "info");
-                try {
-                    const data = await fetchWithRetry(`${API_URL}/subscription`, {
+                fetchWithRetry(`${API_URL}/subscription`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ reference: response.reference, months: months, amount: total }) // Pass amount for server-side validation
-                    });
-                    alert("AURACIOUS SIP: Subscription Renewed Successfully!");
-                    location.reload();
-                } catch (err) {
-                    showToast(err.message || "Verification failed. Contact support.", "error");
-                    db.ref(`transactions/${ref}`).update({ status: 'Failed', message: err.message });
-                }
+                    body: JSON.stringify({ reference: response.reference, months: months, amount: total })
+                })
+                .then(() => location.reload())
+                .catch(err => showToast("Verification failed.", "error"));
             },
             onClose: () => {
                 db.ref(`transactions/${ref}`).update({ status: 'Canceled' });
