@@ -9,8 +9,10 @@ if (!admin.apps.length) {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
-            databaseURL: process.env.FIREBASE_DATABASE_URL
+            databaseURL: process.env.FIREBASE_DATABASE_URL || "https://audacious-sip-default-rtdb.firebaseio.com/"
         });
+        // Enable keep-alive for faster serverless execution
+        admin.database().getRules(); 
         console.log("Firebase Admin Initialized Successfully");
     } catch (error) {
         console.error("CRITICAL: Firebase Admin Init Failed:", error.message);
@@ -33,5 +35,27 @@ const logVerification = async (reference, type, status, message) => {
     }
 };
 
-// 3. Export Shared Resources
-module.exports = { admin, db, axios, PAYSTACK_SECRET_KEY, logVerification };
+// 3. Centralized Paystack Verification Engine
+const verifyPaystack = async (reference) => {
+    if (!reference) throw new Error("Transaction reference is required");
+    
+    const response = await axios.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+        headers: { 
+            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            'Cache-Control': 'no-cache'
+        }
+    });
+
+    const data = response.data.data;
+    if (!data || data.status !== 'success') {
+        throw new Error(data ? `Gateway Status: ${data.status}` : "Invalid response from Paystack");
+    }
+
+    return {
+        amountPaid: data.amount / 100, // Kobo to Naira
+        raw: data
+    };
+};
+
+// 4. Export Shared Resources
+module.exports = { admin, db, axios, PAYSTACK_SECRET_KEY, logVerification, verifyPaystack };

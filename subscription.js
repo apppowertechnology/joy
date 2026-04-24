@@ -1,5 +1,5 @@
 // api/subscription.js - Handle Subscription Verification & Tinubu Overrides
-const { admin, db, axios, PAYSTACK_SECRET_KEY } = require('./backend');
+const { admin, db, verifyPaystack } = require('./backend');
 
 module.exports = async (req, res) => {
     // Handle CORS
@@ -32,21 +32,16 @@ module.exports = async (req, res) => {
         }
 
         // 2. Verify Payment
-        const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
-            headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
-        });
+        const { amountPaid } = await verifyPaystack(reference);
 
-        if (response.data.data.status === 'success') {
-            const actualAmountPaid = response.data.data.amount / 100;
-            
-            if (frontendAmount && actualAmountPaid < (parseFloat(frontendAmount) - 0.01)) {
-                return res.status(400).json({ success: false, message: 'Amount mismatch' });
-            }
+        if (frontendAmount && amountPaid < (parseFloat(frontendAmount) - 0.01)) {
+            return res.status(400).json({ success: false, message: 'Amount mismatch' });
+        }
 
-            // 3. Calculate New Expiry
-            const subRef = db.ref('subscription');
-            const snapshot = await subRef.once('value');
-            const currentSub = snapshot.val() || { expiresAt: Date.now() };
+        // 3. Calculate New Expiry
+        const subRef = db.ref('subscription');
+        const snapshot = await subRef.once('value');
+        const currentSub = snapshot.val() || { expiresAt: Date.now() };
 
             const baseDate = (currentSub.expiresAt && currentSub.expiresAt > Date.now()) ? currentSub.expiresAt : Date.now();
             const newExpiry = baseDate + (months * 30 * 24 * 60 * 60 * 1000);
@@ -62,7 +57,7 @@ module.exports = async (req, res) => {
 
             // 5. Log History
             await db.ref('subscription/history').push({
-                amount: actualAmountPaid,
+                amount: amountPaid,
                 months: months,
                 date: Date.now(),
                 reference: reference,
@@ -71,12 +66,9 @@ module.exports = async (req, res) => {
 
             // 6. Log Analytics
             const salesRef = db.ref('analytics/monthlySales');
-            await salesRef.transaction(current => (current || 0) + actualAmountPaid);
+            await salesRef.transaction(current => (current || 0) + amountPaid);
 
             return res.status(200).json({ success: true, expiresAt: newExpiry });
-        } else {
-            return res.status(400).json({ success: false, message: 'Verification failed' });
-        }
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

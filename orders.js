@@ -1,5 +1,5 @@
 // api/orders.js - Handle Order Creation and Verification
-const { admin, db, axios, PAYSTACK_SECRET_KEY, logVerification } = require('./backend');
+const { admin, db, logVerification, verifyPaystack } = require('./backend');
 
 module.exports = async (req, res) => {
     // Handle CORS
@@ -25,28 +25,21 @@ module.exports = async (req, res) => {
         }
 
         // 2. Verify Payment with Paystack
-        const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
-            headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
-        });
-
-        const data = response.data.data;
-        if (data.status !== 'success') {
-            await logVerification(reference, 'Order', 'Failed', `Paystack returned status: ${data.status}`);
-            return res.status(400).json({ success: false, message: 'Payment verification failed' });
-        }
-
-        const paidAmount = data.amount / 100;
+        const { amountPaid } = await verifyPaystack(reference);
 
         // 3. Security: DB Price Lookup & Stock Pre-check
         const productRequests = orderData.items.map(item => db.ref(`products/${item.id}`).once('value'));
         const productSnapshots = await Promise.all(productRequests);
         
+        // Map snapshots to IDs for reliable lookup
+        const productMap = new Map();
+        productSnapshots.forEach(snap => { if(snap.exists()) productMap.set(snap.key, snap.val()); });
+
         let expectedAmount = 0;
         const verifiedItems = [];
 
-        for (let i = 0; i < productSnapshots.length; i++) {
-            const product = productSnapshots[i].val();
-            const originalItem = orderData.items[i];
+        for (const originalItem of orderData.items) {
+            const product = productMap.get(originalItem.id);
 
             if (!product || (product.stock || 0) < originalItem.quantity) {
                 await logVerification(reference, 'Order', 'Failed', `Stock error: ${originalItem.name}`);
@@ -58,8 +51,8 @@ module.exports = async (req, res) => {
             verifiedItems.push({ ...originalItem, price: currentPrice });
         }
 
-        if (Math.abs(paidAmount - expectedAmount) >= 0.01) {
-            await logVerification(reference, 'Order', 'Failed', `Amount mismatch: Paid ${paidAmount}, Expected ${expectedAmount}`);
+        if (Math.abs(amountPaid - expectedAmount) >= 0.01) {
+            await logVerification(reference, 'Order', 'Failed', `Amount mismatch: Paid ${amountPaid}, Expected ${expectedAmount}`);
             return res.status(400).json({ success: false, message: 'Amount mismatch' });
         }
 
@@ -87,12 +80,12 @@ module.exports = async (req, res) => {
             address: orderData.address,
             note: orderData.note,
             items: verifiedItems,
-            amount: paidAmount,
+            amount: amountPaid,
             ticketNumber: ticketNumber,
             orderStatus: 'Pending',
             paymentStatus: 'Paid',
             paymentReference: reference,
-            createdAt: Date.now()
+            createdAt: admin.database.ServerValue.TIMESTAMP
         };
 
         const orderRef = db.ref('orders').push();
@@ -100,10 +93,10 @@ module.exports = async (req, res) => {
 
         await db.ref(`transactions/${reference}`).update({ 
             status: 'Successful', 
-            amount: paidAmount, 
+            amount: amountPaid, 
             updatedAt: admin.database.ServerValue.TIMESTAMP 
         });
-        await db.ref('analytics/totalRevenue').transaction(c => (c || 0) + paidAmount);
+        await db.ref('analytics/totalRevenue').transaction(c => (c || 0) + amountPaid);
         await db.ref('analytics/successfulPayments').transaction(c => (c || 0) + 1);
 
         await logVerification(reference, 'Order', 'Success', 'Order verified and stock updated');
