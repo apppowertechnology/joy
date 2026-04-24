@@ -482,6 +482,7 @@ async function verifyOrderOnBackend(ref) {
         if (payBtn) {
             payBtn.disabled = false;
             payBtn.innerText = "Retry Verification";
+            payBtn.className = "btn btn-danger"; // Visual cue for failure
             payBtn.onclick = () => verifyOrderOnBackend(ref);
         }
     }

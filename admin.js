@@ -51,6 +51,7 @@ function initDashboard() {
     loadAnalytics();
     loadSettings();
     loadSubscriptionHistory();
+    loadPaymentLogs();
     loadPricingConfig();
     
     setInterval(() => {
@@ -434,6 +435,37 @@ function loadTransactions(filter = 'All') {
         });
         tbody.innerHTML = html;
     });
+}
+
+function loadPaymentLogs() {
+    db.ref('verificationLogs').limitToLast(50).on('value', snapshot => {
+        const tbody = document.getElementById('paymentLogsTableBody');
+        if (!tbody) return;
+        let html = '';
+        snapshot.forEach(child => {
+            const log = child.val();
+            const statusClass = log.status.toLowerCase();
+            html = `
+                <tr>
+                    <td><small>${new Date(log.timestamp).toLocaleString()}</small></td>
+                    <td><span class="badge" style="background:#eee; color:#333">${log.type}</span></td>
+                    <td><code>${log.reference}</code></td>
+                    <td><span class="badge badge-${statusClass}">${log.status}</span></td>
+                    <td style="font-size: 0.85rem; color: ${log.status === 'Failed' ? 'var(--danger)' : 'inherit'}">
+                        ${log.message}
+                    </td>
+                </tr>` + html;
+        });
+        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">No verification logs found.</td></tr>';
+    });
+}
+
+function clearPaymentLogs() {
+    if (confirm("Permanently delete all verification debug logs?")) {
+        db.ref('verificationLogs').remove().then(() => {
+            showToast("Logs cleared successfully.");
+        }).catch(err => showToast("Error clearing logs", "error"));
+    }
 }
 
 /**

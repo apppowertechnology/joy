@@ -43,6 +43,7 @@
                 <a href="#" class="nav-link" onclick="switchTab('transactions')"><i class="fas fa-credit-card"></i> Payments</a>
                 <a href="#" class="nav-link" onclick="switchTab('analytics')"><i class="fas fa-calculator"></i> Profits</a>
                 <a href="#" class="nav-link" onclick="switchTab('subscription')"><i class="fas fa-key"></i> License</a>
+                <a href="#" class="nav-link" onclick="switchTab('payment-logs')"><i class="fas fa-bug"></i> Payment Logs</a>
                 <a href="#" class="nav-link" onclick="switchTab('settings')"><i class="fas fa-cog"></i> Settings</a>
             </nav>
             <div class="sidebar-footer">
@@ -262,6 +263,27 @@
                             </tr>
                         </thead>
                         <tbody id="subHistoryTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="tab-payment-logs" class="tab-content">
+                <div class="admin-card">
+                    <div class="table-header">
+                        <h3>Verification Debug Logs</h3>
+                        <button class="btn btn-sm btn-outline" onclick="clearPaymentLogs()">Clear Logs</button>
+                    </div>
+                    <table class="premium-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Type</th>
+                                <th>Reference</th>
+                                <th>Status</th>
+                                <th>Message / Error Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="paymentLogsTableBody"></tbody>
                     </table>
                 </div>
             </section>

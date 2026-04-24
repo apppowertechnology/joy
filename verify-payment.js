@@ -1,6 +1,15 @@
 // api/verify-payment.js - Generic Paystack Verification Helper
+const admin = require('firebase-admin');
 const axios = require('axios');
-const { PAYSTACK_SECRET_KEY } = require('./config');
+
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
+        databaseURL: process.env.FIREBASE_DATABASE_URL
+    });
+}
 
 module.exports = async (req, res) => {
     // Handle CORS

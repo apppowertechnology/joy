@@ -88,7 +88,7 @@ function updateUI(sub) {
     document.getElementById('countdownDisplay').innerText = countdownText;
 }
 
-function savePricingConfig() {
+async function savePricingConfig() {
     const monthlyVal = document.getElementById('devMonthlyPrice').value;
     const graceVal = document.getElementById('devGraceDays').value;
 
@@ -97,19 +97,20 @@ function savePricingConfig() {
 
     if (isNaN(monthly) || monthly < 0) return alert("Please enter a valid monthly price (e.g. 100).");
 
-    const pricingData = {
-        monthlyPrice: monthly,
-        yearly: monthly * 12, // Auto-calculate yearly for system consistency
-        grace: grace,
-        updatedAt: Date.now(),
-        updatedBy: "Developer Master"
-    };
-
-    db.ref('subscriptionPricing').set(pricingData).then(() => {
-        db.ref('pricingLogs').push(pricingData);
-        alert("Subscription price updated successfully.");
-        logAction(`Price Updated: ₦${monthly.toLocaleString()} / Month`);
-    });
+    try {
+        const res = await fetch('/api/subscription', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ monthlyPrice: monthly, grace: grace })
+        });
+        const result = await res.json();
+        if (result.success) {
+            alert("Subscription price updated successfully.");
+            logAction(`Price Updated: ₦${monthly.toLocaleString()} / Month`);
+        }
+    } catch (err) {
+        alert("Failed to update pricing: " + err.message);
+    }
 }
 
 function logAction(msg) {

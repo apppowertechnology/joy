@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
             monthlyPrice, 
             grace, 
             updatedAt: Date.now() 
-        });
+        }, (err) => { if(err) console.error("Pricing update failed:", err); });
         return res.status(200).json({ success: true });
     }
 
@@ -51,7 +51,7 @@ module.exports = async (req, res) => {
         if (response.data.data.status === 'success') {
             const actualAmountPaid = response.data.data.amount / 100;
             
-            if (frontendAmount && actualAmountPaid < frontendAmount) {
+            if (frontendAmount && actualAmountPaid < (parseFloat(frontendAmount) - 0.01)) {
                 return res.status(400).json({ success: false, message: 'Amount mismatch' });
             }
 
