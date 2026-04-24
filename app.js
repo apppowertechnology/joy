@@ -489,6 +489,10 @@ async function verifyOrderOnBackend(ref) {
 }
 
 function showOrderReceipt(order) {
+    if (!order) {
+        showToast("Payment confirmed, but receipt data is loading. Check your email or Admin Panel.", "info");
+        return;
+    }
     const container = document.getElementById('receiptContent');
     document.getElementById('orderModal').style.display = 'none';
     document.getElementById('orderSuccessModal').style.display = 'flex';

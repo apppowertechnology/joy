@@ -1,25 +1,5 @@
 // api/orders.js - Handle Order Creation and Verification
-const admin = require('firebase-admin');
-const axios = require('axios');
-
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
-
-// Initialize Firebase Admin for Serverless
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
-        databaseURL: process.env.FIREBASE_DATABASE_URL
-    });
-}
-const db = admin.database();
-
-const logVerification = async (reference, type, status, message) => {
-    await db.ref('verificationLogs').push({
-        reference: reference || 'N/A',
-        type, status, message,
-        timestamp: Date.now()
-    });
-};
+const { admin, db, axios, PAYSTACK_SECRET_KEY, logVerification } = require('./backend');
 
 module.exports = async (req, res) => {
     // Handle CORS

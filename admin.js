@@ -413,24 +413,32 @@ function viewFullImage(url) {
 }
 
 function loadTransactions(filter = 'All') {
-    db.ref('transactions').orderByChild('createdAt').on('value', snapshot => {
+    // Pointing to 'orders' node because it contains verified, rich data
+    db.ref('orders').orderByChild('createdAt').on('value', snapshot => {
         const tbody = document.getElementById('transactionTableBody');
         let html = '';
         snapshot.forEach(child => {
-            const t = child.val();
-            if (filter !== 'All' && t.status !== filter) return;
+            const o = child.val();
+            // Map filter from orderStatus/paymentStatus
+            if (filter === 'Successful' && o.paymentStatus !== 'Paid') return;
+            if (filter === 'Failed' && o.paymentStatus === 'Paid') return;
             
-            const statusClass = t.status.toLowerCase();
+            const statusClass = o.paymentStatus === 'Paid' ? 'successful' : 'failed';
+            const itemsSummary = o.items ? o.items.map(i => `${i.name} (x${i.quantity})`).join(', ') : 'N/A';
+
             html = `
                 <tr>
                     <td>
-                        <strong>${t.customerName}</strong><br>
-                        <small>${t.phone}</small>
+                        <strong>${o.customerName}</strong><br>
+                        <small>${o.phone}</small>
                     </td>
-                    <td>₦${t.amount.toLocaleString()}</td>
-                    <td><span class="badge badge-${statusClass}">${t.status}</span></td>
-                    <td><code>${t.reference}</code></td>
-                    <td>${new Date(t.createdAt).toLocaleDateString()}</td>
+                    <td>
+                        ₦${o.amount.toLocaleString()}<br>
+                        <small style="color:#666">${itemsSummary}</small>
+                    </td>
+                    <td><span class="badge badge-${statusClass}">${o.paymentStatus}</span><br><small>${o.ticketNumber}</small></td>
+                    <td><code>${o.paymentReference}</code></td>
+                    <td>${new Date(o.createdAt).toLocaleDateString()}</td>
                 </tr>` + html;
         });
         tbody.innerHTML = html;
