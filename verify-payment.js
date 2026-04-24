@@ -1,5 +1,6 @@
-// api/verify-payment.js - Generic Paystack Verification Helper
-const { axios, PAYSTACK_SECRET_KEY } = require('./backend');
+// api/verify-payment.js - Paystack Webhook Listener & Redundant Transaction Coverage
+const { axios, PAYSTACK_SECRET_KEY, logVerification, verifyPaystack, processOrder, processSubscription } = require('./backend');
+const crypto = require('crypto');
 
 module.exports = async (req, res) => {
     // Handle CORS
@@ -8,31 +9,69 @@ module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') return res.status(200).end();
-    if (req.method !== 'POST') return res.status(405).json({ success: false, message: 'Method not allowed' });
+    if (req.method !== 'POST') return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
 
-    const { reference } = req.body;
-    if (!reference) return res.status(400).json({ success: false, message: 'Reference missing' });
+    // 1. Verify Paystack Webhook Signature (Security Critical)
+    const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(JSON.stringify(req.body)).digest('hex');
+    if (hash !== req.headers['x-paystack-signature']) {
+        await logVerification('N/A', 'Webhook', 'Failed', 'Invalid Paystack signature');
+        return res.status(400).json({ success: false, message: 'Invalid signature' });
+    }
+
+    // 2. Extract Reference from Webhook Payload
+    const event = req.body;
+    const reference = event.data?.reference;
+    const eventType = event.event;
+
+    if (!reference) {
+        await logVerification('N/A', 'Webhook', 'Failed', `Missing reference in event: ${eventType}`);
+        return res.status(400).json({ success: false, message: 'Reference missing in webhook payload' });
+    }
+
+    await logVerification(reference, 'Webhook', 'Received', `Event: ${eventType}`);
 
     try {
-        const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
-            headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
-        });
+        // Only process successful charge events
+        if (eventType === 'charge.success') {
+            // 3. Verify transaction with Paystack (redundant but good practice for webhooks)
+            const { amountPaid } = await verifyPaystack(reference);
 
-        if (response.data.data.status === 'success') {
-            // This returns the raw verification data. 
-            // The specific endpoints (orders/subscription) will call this logic or handle it internally.
-            return res.status(200).json({ 
-                success: true, 
-                data: response.data.data,
-                amount: response.data.data.amount / 100 
-            });
+            // 4. Retrieve original transaction details from Firebase
+            const originalTransSnap = await db.ref(`transactions/${reference}`).once('value');
+            const originalTransData = originalTransSnap.val();
+
+            if (!originalTransData) {
+                await logVerification(reference, 'Webhook', 'Warning', 'Original transaction data not found in DB. Cannot process order/subscription.');
+                return res.status(200).json({ success: true, message: 'Transaction data not found, no action taken.' });
+            }
+
+            // Dispatch to appropriate processing logic based on original transaction type
+            if (originalTransData.items) { // This indicates an order
+                const orderData = {
+                    customerName: originalTransData.customerName,
+                    phone: originalTransData.phone,
+                    address: originalTransData.address,
+                    note: originalTransData.note,
+                    items: originalTransData.items // Assuming items are stored in pending transaction
+                };
+                 const result = await processOrder(reference, orderData, amountPaid, true);
+                return res.status(200).json(result);
+            } else if (originalTransData.months) { // This indicates a subscription
+                const result = await processSubscription(reference, originalTransData.months, amountPaid, originalTransData.amount, true);
+                return res.status(200).json(result);
+            } else {
+                await logVerification(reference, 'Webhook', 'Warning', 'Unknown transaction type. No order/subscription processed.');
+                return res.status(200).json({ success: true, message: 'Unknown transaction type, no action taken.' });
+            }
         } else {
-            return res.status(400).json({ success: false, message: 'Payment not successful' });
+            await logVerification(reference, 'Webhook', 'Ignored', `Event type: ${eventType}`);
+            return res.status(200).json({ success: true, message: 'Webhook event not processed' });
         }
     } catch (error) {
+        await logVerification(reference, 'Webhook', 'Error', error.message);
         return res.status(500).json({ 
             success: false, 
-            message: 'Internal Server Error during verification' 
+            message: `Internal Server Error: ${error.message}` 
         });
     }
 };

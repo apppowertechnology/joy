@@ -1,0 +1,30 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "orders": {
+      ".indexOn": [
+        "paymentReference",
+        "ticketNumber",
+        "createdAt"
+      ]
+    },
+    "transactions": {
+      ".indexOn": [
+        "createdAt"
+      ]
+    },
+    "subscription": {
+      "history": {
+        ".indexOn": [
+          "reference"
+        ]
+      }
+    },
+    "analytics": {
+      "traffic": {
+        ".indexOn": [".value"]
+      }
+    }
+  }
+}

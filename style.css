@@ -388,6 +388,9 @@ input:focus { border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(27,
 .badge-successful { background: rgba(45, 206, 137, 0.1); color: var(--success); }
 .badge-failed { background: rgba(245, 54, 92, 0.1); color: var(--danger); }
 .badge-pending { background: rgba(255, 159, 28, 0.1); color: var(--orange); }
+.badge-attempt { background: rgba(108, 117, 125, 0.1); color: var(--text-muted); border: 1px solid #ddd; }
+.badge-success { background: rgba(45, 206, 137, 0.1); color: var(--success); }
+.badge-error { background: rgba(245, 54, 92, 0.1); color: var(--danger); font-weight: 800; }
 .badge-expired { background: rgba(108, 117, 125, 0.1); color: #666; border: 1px solid #ddd; }
 .badge-canceled { background: rgba(108, 117, 125, 0.1); color: var(--text-muted); }
 

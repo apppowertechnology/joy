@@ -1,7 +1,10 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/AS-(.*)", "destination": "/index.html" },
+    {
+      "source": "/AS-:path*",
+      "destination": "/index.html"
+    },
     { "source": "/story", "destination": "/index.html" },
     { "source": "/tracking", "destination": "/index.html" },
     { "source": "/admin", "destination": "/admin.html" },

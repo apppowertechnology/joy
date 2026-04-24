@@ -18,8 +18,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function handleInitialRouting() {
     const path = window.location.pathname;
+    const urlParams = new URLSearchParams(window.location.search);
+    
     if (path === '/story') toggleOurStory(true);
     if (path === '/tracking') toggleTrackingView(true);
+
+    // CAPTURE REFERENCE: Check search params OR pathname (for Vercel rewrites)
+    let ref = urlParams.get('reference') || urlParams.get('trxref');
+    if (!ref && path.startsWith('/AS-')) {
+        ref = path.substring(1); // Extracts "AS-XXXX" from "/AS-XXXX"
+    }
+
+    if (ref && ref.includes('AS-')) {
+        // Recover lost form data from session if this was a redirect
+        const savedData = sessionStorage.getItem('pending_checkout_data');
+        const orderData = savedData ? JSON.parse(savedData) : null;
+        
+        verifyOrderOnBackend(ref, orderData);
+        
+        // Clean the URL for a premium look
+        window.history.replaceState({}, document.title, "/");
+    }
 }
 
 const showToast = (msg, type = 'success') => {
@@ -410,15 +429,32 @@ function processPayment() {
     const amount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const ref = 'AS-' + Math.random().toString(36).substr(2, 9).toUpperCase();
     const payBtn = document.querySelector('#orderForm button[type="submit"]');
+
+    const customerInfo = {
+        customerName: document.getElementById('custName').value,
+        phone: document.getElementById('custPhone').value,
+        address: document.getElementById('custAddress').value,
+        note: document.getElementById('orderNote').value
+    };
+
+    // PERSISTENCE: Save form data in case of redirect
+    sessionStorage.setItem('pending_checkout_data', JSON.stringify(customerInfo));
+
     payBtn.disabled = true;
     payBtn.innerText = "Initializing Paystack...";
 
     // Log Pending Transaction
     const transData = {
-        customerName: document.getElementById('custName').value,
-        phone: document.getElementById('custPhone').value,
+        ...customerInfo,
         amount: amount,
-        items: cart.map(i => `${i.name} (${i.quantity})`).join(', '),
+        items: cart.map(item => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            unit: item.unit,
+            price: item.price,
+            quantity: item.quantity
+        })),
         status: 'Pending',
         reference: ref,
         createdAt: Date.now()
@@ -432,10 +468,11 @@ function processPayment() {
         currency: 'NGN',
         ref: ref,
         callback: function(response) {
+            // Strictly handle via AJAX, do not allow browser redirect
             verifyOrderOnBackend(response.reference);
         },
         onClose: () => {
-            db.ref(`transactions/${ref}`).update({ status: 'Failed' });
+            db.ref(`transactions/${ref}`).update({ status: 'Canceled' });
             payBtn.disabled = false;
             payBtn.innerText = `Proceed to Payment`;
         }
@@ -443,12 +480,13 @@ function processPayment() {
     handler.openIframe();
 }
 
-async function verifyOrderOnBackend(ref) {
-    const orderData = {
-        customerName: document.getElementById('custName').value,
-        phone: document.getElementById('custPhone').value,
-        address: document.getElementById('custAddress').value,
-        note: document.getElementById('orderNote').value,
+async function verifyOrderOnBackend(ref, recoveredData = null) {
+    // Use recovered data (from redirect) or live form data (from popup)
+    const orderData = recoveredData || {
+        customerName: document.getElementById('custName')?.value,
+        phone: document.getElementById('custPhone')?.value,
+        address: document.getElementById('custAddress')?.value,
+        note: document.getElementById('orderNote')?.value,
         items: cart.map(item => ({
             id: item.id,
             name: item.name,
@@ -458,6 +496,14 @@ async function verifyOrderOnBackend(ref) {
             quantity: item.quantity
         }))
     };
+
+    // Safety Check: If we are recovering from a redirect and session is empty
+    if (!orderData.customerName && !recoveredData) {
+        setProcessingState(false);
+        showToast("Order details lost during redirect. Please check your email or contact support with your reference.", "error");
+        console.error("Redirect Recovery Failed: No order data available.");
+        return;
+    }
 
     setProcessingState(true, "Verifying Payment...");
 
@@ -470,6 +516,7 @@ async function verifyOrderOnBackend(ref) {
         if (result.success) {
             lastOrder = result.order;
             localStorage.removeItem('auracious_cart');
+                sessionStorage.removeItem('pending_checkout_data');
             cart = [];
             updateCartBadge();
             showOrderReceipt(result.order);
@@ -489,10 +536,6 @@ async function verifyOrderOnBackend(ref) {
 }
 
 function showOrderReceipt(order) {
-    if (!order) {
-        showToast("Payment confirmed, but receipt data is loading. Check your email or Admin Panel.", "info");
-        return;
-    }
     const container = document.getElementById('receiptContent');
     document.getElementById('orderModal').style.display = 'none';
     document.getElementById('orderSuccessModal').style.display = 'flex';

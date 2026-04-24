@@ -46,12 +46,13 @@ function initDashboard() {
     loadCategories();
     loadProducts();
     loadTransactions('All');
-    loadUploadedAssets();
-    loadTrackingOrders();
+    loadUploadedAssets(); // Product Media
+    loadOrders();         // Consolidated Orders & Tracking
     loadAnalytics();
     loadSettings();
     loadSubscriptionHistory();
     loadPaymentLogs();
+    loadOrderRecovery();
     loadPricingConfig();
     
     setInterval(() => {
@@ -413,13 +414,12 @@ function viewFullImage(url) {
 }
 
 function loadTransactions(filter = 'All') {
-    // Pointing to 'orders' node because it contains verified, rich data
     db.ref('orders').orderByChild('createdAt').on('value', snapshot => {
         const tbody = document.getElementById('transactionTableBody');
         let html = '';
         snapshot.forEach(child => {
             const o = child.val();
-            // Map filter from orderStatus/paymentStatus
+            // Real-time verification check
             if (filter === 'Successful' && o.paymentStatus !== 'Paid') return;
             if (filter === 'Failed' && o.paymentStatus === 'Paid') return;
             
@@ -446,25 +446,72 @@ function loadTransactions(filter = 'All') {
 }
 
 function loadPaymentLogs() {
-    db.ref('verificationLogs').limitToLast(50).on('value', snapshot => {
+    const logsRef = db.ref('verificationLogs');
+    logsRef.off('value'); // Prevent duplicate listeners
+    logsRef.limitToLast(50).on('value', snapshot => {
         const tbody = document.getElementById('paymentLogsTableBody');
         if (!tbody) return;
         let html = '';
         snapshot.forEach(child => {
             const log = child.val();
             const statusClass = log.status.toLowerCase();
+            const isCritical = log.status === 'Error' || log.status === 'Failed';
             html = `
-                <tr>
+                <tr style="${isCritical ? 'background: rgba(245, 54, 92, 0.02);' : ''}">
                     <td><small>${new Date(log.timestamp).toLocaleString()}</small></td>
                     <td><span class="badge" style="background:#eee; color:#333">${log.type}</span></td>
                     <td><code>${log.reference}</code></td>
                     <td><span class="badge badge-${statusClass}">${log.status}</span></td>
-                    <td style="font-size: 0.85rem; color: ${log.status === 'Failed' ? 'var(--danger)' : 'inherit'}">
+                    <td style="font-size: 0.85rem; color: ${isCritical ? 'var(--danger)' : 'inherit'}">
                         ${log.message}
                     </td>
                 </tr>` + html;
         });
         tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">No verification logs found.</td></tr>';
+    });
+}
+
+function loadOrderRecovery() {
+    // We need both transactions and orders to find mismatches
+    db.ref('transactions').on('value', transSnap => {
+        db.ref('orders').once('value', ordersSnap => {
+            const transactions = transSnap.val() || {};
+            const orders = ordersSnap.val() || {};
+            
+            // Create a set of references that already have orders
+            const orderRefs = new Set();
+            Object.values(orders).forEach(o => {
+                if (o.paymentReference) orderRefs.add(o.paymentReference);
+            });
+
+            const tbody = document.getElementById('orderRecoveryTableBody');
+            if (!tbody) return;
+            let html = '';
+            let orphanedCount = 0;
+
+            Object.keys(transactions).forEach(ref => {
+                const t = transactions[ref];
+                // Successful means Paystack verified it, but if it's not in orders...
+                if (t.status === 'Successful' && !orderRefs.has(ref)) {
+                    orphanedCount++;
+                    html += `
+                        <tr>
+                            <td><strong>${t.customerName || 'Unknown'}</strong><br><small>${t.phone || 'N/A'}</small></td>
+                            <td>₦${(t.amount || 0).toLocaleString()}</td>
+                            <td><code>${ref}</code></td>
+                            <td>${new Date(t.createdAt || t.updatedAt).toLocaleString()}</td>
+                            <td><button class="btn btn-sm btn-primary" onclick="window.open('https://dashboard.paystack.com/#/transactions?q=${ref}', '_blank')">Verify on Paystack</button></td>
+                        </tr>`;
+                }
+            });
+
+            tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">All paid transactions have matching orders.</td></tr>';
+            const badge = document.getElementById('recoveryBadge');
+            if (badge) {
+                badge.innerText = orphanedCount;
+                badge.style.display = orphanedCount > 0 ? 'inline-block' : 'none';
+            }
+        });
     });
 }
 
@@ -598,17 +645,21 @@ function updateSubscriptionTimer() {
     }
 }
 
-function loadTrackingOrders() {
-    db.ref('orders').orderByChild('createdAt').on('value', snapshot => {
-        const tbody = document.getElementById('trackingTableBody');
+function loadOrders() {
+    const ordersRef = db.ref('orders');
+    ordersRef.off('value');
+    ordersRef.orderByChild('createdAt').on('value', snapshot => {
+        const trackingBody = document.getElementById('trackingTableBody');
+        const listBody = document.getElementById('adminOrderList');
         let html = '';
+
         snapshot.forEach(child => {
             const o = child.val();
             const key = child.key;
             const statusClass = o.orderStatus.toLowerCase().replace(/\s+/g, '-');
             
             html = `
-                <tr class="tracking-row" data-search="${(o.ticketNumber + o.customerName + o.phone).toLowerCase()}">
+                <tr class="tracking-row" data-search="${(o.ticketNumber + o.customerName + (o.phone||'')).toLowerCase()}">
                     <td><strong>${o.ticketNumber}</strong></td>
                     <td>${o.customerName}<br><small>${o.phone}</small></td>
                     <td>₦${o.amount.toLocaleString()}</td>
@@ -627,7 +678,10 @@ function loadTrackingOrders() {
                     </td>
                 </tr>` + html;
         });
-        tbody.innerHTML = html || '<tr><td colspan="6" style="text-align:center">No orders found.</td></tr>';
+
+        // Populate both the Tracking table and the primary Orders list
+        if (trackingBody) trackingBody.innerHTML = html || '<tr><td colspan="6" style="text-align:center">No orders found.</td></tr>';
+        if (listBody) listBody.innerHTML = `<table class="premium-table"><thead><tr><th>Ticket</th><th>Customer</th><th>Amount</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead><tbody>${html}</tbody></table>`;
     });
 }
 
