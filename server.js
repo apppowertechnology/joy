@@ -1,7 +1,6 @@
 // server.js - AURACIOUS SIP Secure Backend
 require('dotenv').config();
 const express = require('express');
-const axios = require('axios');
 const admin = require('firebase-admin');
 const cors = require('cors');
 const app = express();
@@ -12,20 +11,11 @@ const FIREBASE_URL = process.env.FIREBASE_DATABASE_URL;
 app.use(express.json());
 app.use(cors());
 
-// Initialize Firebase Admin (Using credentials locally)
-try {
-    if (!admin.apps.length) {
-        // Parse the service account from an environment variable string
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            databaseURL: FIREBASE_URL
-        });
-    }
-} catch (e) {
-    console.error("Firebase Admin initialization failed:", e.message);
-}
-const db = admin.database();
+// This file should not initialize Firebase Admin or listen on a port if backend.js is the main entry.
+// The Firebase Admin SDK should be initialized once, typically in firebaseAdmin.js.
+// Routes defined here are likely duplicated or should be moved to backend.js.
+// Disabling server startup for this file to prevent conflicts.
+// const db = admin.database(); // If this file needs db, it should import it from firebaseAdmin.js or backend.js
 
 // Health Check Route (To debug 404s)
 app.get('/api/health', (req, res) => {
@@ -207,9 +197,11 @@ app.post('/api/subscription', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Start server immediately (Unless required as a module for serverless)
-const server = app.listen(PORT, () => {
-    console.log(`AURACIOUS SIP Backend active on: http://localhost:${PORT}`);
-}).on('error', (err) => console.error("Server startup error:", err));
+// To prevent conflicts with backend.js, this file should not start its own server.
+// If this file is intended to be a separate server, then backend.js should be removed or refactored.
+// If this file contains unique routes, they should be moved to backend.js.
+// const server = app.listen(PORT, () => {
+//     console.log(`AURACIOUS SIP Backend active on: http://localhost:${PORT}`);
+// }).on('error', (err) => console.error("Server startup error:", err));
 
 module.exports = app;

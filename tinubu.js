@@ -27,6 +27,7 @@ function initDevDashboard() {
         }
 
         document.getElementById('devMonthlyPrice').value = cfg.monthlyPrice;
+        document.getElementById('devGraceDays').value = cfg.grace || 3;
         // Auto-fill yearly if missing based on 12-month calculationce
     });
 
@@ -98,7 +99,7 @@ async function savePricingConfig() {
     if (isNaN(monthly) || monthly < 0) return alert("Please enter a valid monthly price (e.g. 100).");
 
     try {
-        const res = await fetch('/api/subscription', {
+        const res = await fetch(`${API_URL}/subscription`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ monthlyPrice: monthly, grace: grace })

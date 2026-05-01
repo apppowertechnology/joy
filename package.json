@@ -1,10 +1,20 @@
 {
   "name": "auracious-sip",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "description": "AURACIOUS SIP Production Package",
-  "main": "index.html",
+  "main": "backend.js",
+  "scripts": {
+    "start": "node backend.js"
+  },
   "dependencies": {
-    "axios": "^1.6.0",
-    "firebase-admin": "^11.11.0"
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^12.1.1",
+    "node-cron": "^3.0.3"
   }
 }

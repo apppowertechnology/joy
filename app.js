@@ -44,7 +44,8 @@ function handleInitialRouting() {
         const savedData = sessionStorage.getItem('pending_checkout_data');
         const orderData = savedData ? JSON.parse(savedData) : null;
         
-        verifyOrderOnBackend(ref, orderData);
+        // Using .catch here as a safety net for the async call
+        verifyOrderOnBackend(ref, orderData).catch(err => console.error("Routing Error:", err));
         
         // Clean the URL for a premium look
         window.history.replaceState({}, document.title, "/");
@@ -55,13 +56,16 @@ async function handleSubscriptionRecovery(ref) {
     const months = sessionStorage.getItem('pending_sub_months');
     const amount = sessionStorage.getItem('pending_sub_amount');
     
-    setProcessingState(true, "Verifying Subscription...");
+    setProcessingState(true, "Verifying Access...");
     try {
-        await fetchWithRetry(`${API_URL}/subscription`, {
+        const result = await fetchWithRetry(`${API_URL}/subscription`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ reference: ref, months: parseInt(months), amount: parseFloat(amount) })
         });
+
+        if (!result.success) throw new Error(result.message || "Verification failed");
+
         sessionStorage.removeItem('pending_sub_months');
         location.reload();
     } catch (err) {
@@ -188,7 +192,7 @@ const setProcessingState = (isProcessing, message = "Processing...") => {
         overlay.id = 'processingOverlay';
         overlay.className = 'modal'; // Reuse modal styles for backdrop
         overlay.style.display = 'flex';
-        overlay.innerHTML = `<div class="modal-content" style="text-align:center;"><div class="success-icon-circle blinking"><i class="fas fa-sync-alt"></i></div><h3 id="procMsg">${message}</h3><p>Please do not close this window.</p></div>`;
+        overlay.innerHTML = `<div class="modal-content" style="text-align:center;"><div class="success-icon-circle blinking"><i class="fas fa-sync-alt"></i></div><h3 id="procMsg">${message}</h3><p style="font-size:0.9rem; color:#666;">Securing transaction...</p></div>`;
         document.body.appendChild(overlay);
     }
     if (overlay) overlay.style.display = isProcessing ? 'flex' : 'none';
@@ -238,13 +242,16 @@ async function initiatePaystackSubscriptionPaymentFromLockScreen() {
         ref: ref,
         callback_url: window.location.origin, // Force return to index.html for recovery
         callback: function(response) {
-            setProcessingState(true, "Verifying Subscription...");
+            setProcessingState(true, "Finalizing...");
             fetchWithRetry(`${API_URL}/subscription`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ reference: response.reference, months: months, amount: total })
             })
-            .then(() => location.reload())
+            .then(res => {
+                if (res.success) location.reload();
+                else throw new Error(res.message);
+            })
             .catch(err => {
                 setProcessingState(false);
                 showToast("Verification failed. Please contact support.", "error");
@@ -534,22 +541,24 @@ async function verifyOrderOnBackend(ref, recoveredData = null) {
         }))
     };
 
-    // Safety Check: If we are recovering from a redirect and session is empty
-    if (!orderData.customerName && !recoveredData) {
-        setProcessingState(false);
-        showToast("Order details lost during redirect. Please check your email or contact support with your reference.", "error");
-        console.error("Redirect Recovery Failed: No order data available.");
-        return;
-    }
-
     setProcessingState(true, "Verifying Payment...");
 
     try {
+        // Safety Check: If we are recovering from a redirect and session is empty
+        if (!orderData.customerName && !recoveredData) {
+            throw new Error("Order details lost. Please check your email or contact support.");
+        }
+
         const result = await fetchWithRetry(`${API_URL}/orders`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: ref, orderData })
         });
+
+        if (!result.success) {
+            throw new Error(result.message || "Verification failed");
+        }
+
         if (result.success) {
             lastOrder = result.order;
             localStorage.removeItem('auracious_cart');
@@ -806,59 +815,31 @@ function searchPublicOrder() {
 async function manualVerifyPayment() {
     const refInput = document.getElementById('manualRefInput');
     const ref = refInput ? refInput.value.trim() : null;
-    if (!ref) return showToast("Please enter the payment reference from your bank alert/Paystack", "error");
+    if (!ref) return showToast("Please enter the payment reference", "error");
 
-    setProcessingState(true, "Checking transaction records...");
+    setProcessingState(true, "Verifying status...");
     
     try {
-        // 1. DATABASE CHECK: Search completed orders (already processed)
-        const orderSnap = await db.ref('orders').orderByChild('paymentReference').equalTo(ref).once('value');
-        if (orderSnap.exists()) {
-            let existingOrder;
-            orderSnap.forEach(c => { existingOrder = c.val(); });
-            
-            lastOrder = existingOrder;
-            setProcessingState(false);
-            showOrderReceipt(existingOrder);
+        const res = await fetch(`${API_URL}/verify-payment/${encodeURIComponent(ref)}`);
+        const result = await res.json();
+
+        if (!result.success) throw new Error(result.message || "Verification failed");
+
+        if (result.status === 'success') {
+            showToast("✅ Payment Successful", "success");
             if (refInput) refInput.value = '';
-            showToast("Order record found and recovered.");
-            return;
+            alert(`✅ Payment Successful\nReference: ${ref}\nAmount: ₦${result.amount?.toLocaleString()}\n\nStatus: ${result.message}`);
+            location.reload(); 
+        } else if (result.status === 'pending') {
+            showToast("⏳ Payment Pending", "warning");
+            alert(`⏳ Payment Pending\nReference: ${ref}\n\nStatus: ${result.message}`);
+        } else {
+            showToast("❌ Payment Failed", "error");
+            alert(`❌ Payment Failed\nReference: ${ref}\n\nStatus: ${result.message}`);
         }
-
-        // 2. LEDGER CHECK: Did we initiate this transaction? 
-        // This validates the reference against our own records before Paystack
-        const snapshot = await db.ref(`transactions/${ref}`).once('value');
-        const transData = snapshot.val();
-
-        if (!transData) {
-            setProcessingState(false);
-            return showToast("Invalid reference number. This payment was not initiated on this platform.", "error");
-        }
-
-        // 3. CONTEXT VALIDATION: Ensure it's not a subscription token
-        if (!transData.items && transData.months) {
-            setProcessingState(false);
-            return showToast("This reference belongs to a system license, not a product order.", "error");
-        }
-
-        // 4. FINAL VERIFICATION: Confirmed in DB, now sync with Gateway
-        const statusMsg = transData.status === 'Successful' ? "Finalizing order details..." : "Synchronizing payment status...";
-        setProcessingState(true, statusMsg);
-
-        const orderData = {
-            customerName: transData.customerName,
-            email: transData.email,
-            phone: transData.phone,
-            address: transData.address,
-            note: transData.note || "",
-            items: transData.items
-        };
-
-        // Trigger the professional success flow
-        await verifyOrderOnBackend(ref, orderData);
-        if (refInput) refInput.value = '';
     } catch (e) {
+        showToast(e.message, "error");
+    } finally {
         setProcessingState(false);
-        showToast(e.message || "Unable to sync payment. Please try again or check your connection.", "error");
     }
 }

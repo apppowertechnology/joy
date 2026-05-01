@@ -3,6 +3,7 @@ let salesChart = null;
 let systemPricing = { monthlyPrice: 100 };
 let currentSubscriptionExpiry = null;
 let subscriptionTicker = null;
+let currentTransactionFilter = 'All'; // Track filter for export logic
 
 function authAdmin() {
     const pin = document.getElementById('adminPin').value;
@@ -14,13 +15,74 @@ function authAdmin() {
         }
 
     if (pin === "AURACIOUSSIP MANAGEMENT") {
+        // SPEECH UNLOCK: Trigger a silent utterance immediately within the user-click event.
+        // This ensures browsers (Chrome/Safari) allow the actual voice greeting to play 
+        // after the asynchronous database fetch is complete.
+        if ('speechSynthesis' in window) { 
+            const unlockUtterance = new SpeechSynthesisUtterance(" "); // A space, not empty string
+            window.speechSynthesis.speak(unlockUtterance);
+        }
+
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('adminDashboard').style.display = 'block';
         initDashboard();
+        playWelcomeMessage();
     } else {
         document.getElementById('loginError').style.display = 'block';
         document.getElementById('adminPin').value = '';
     }
+    });
+}
+
+/**
+ * Helper to speak text with an authoritative, executive tone
+ */
+function speakNow(text) {
+    if (!('speechSynthesis' in window)) return;
+    
+    window.speechSynthesis.cancel(); // Stop any pending speech
+
+    const speak = () => {
+        const utter = new SpeechSynthesisUtterance(text);
+        const voices = window.speechSynthesis.getVoices();
+        
+        // Priority: Professional Male English voices
+        const preferred = voices.find(v => v.name.includes('Google') && v.name.includes('Male') && v.lang.includes('en')) ||
+                         voices.find(v => v.name.includes('Male') && v.lang.includes('en')) ||
+                         voices.find(v => v.lang.includes('en-GB')) ||
+                         voices.find(v => v.lang.includes('en'));
+                         
+        if (preferred) utter.voice = preferred;
+        
+        // Authoritative Tone Configuration
+        utter.rate = 0.8;  // Slower, more deliberate pace
+        utter.pitch = 0.75; // Deeper, more mature pitch
+        utter.volume = 1.0; // Already at maximum volume (1.0 is the highest)
+        
+        window.speechSynthesis.speak(utter);
+    };
+
+    // Handle async voice loading in some browsers
+    if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = speak;
+    } else { speak(); }
+}
+
+/**
+ * Triggered by the Test button in Settings
+ */
+function testWelcomeMessage() {
+    const phrase = document.getElementById('setting-greeting-phrase').value || "Welcome";
+    const name = document.getElementById('setting-ceo-name').value;
+    speakNow(name ? `${phrase}, CEO ${name}` : `${phrase} my CEO`);
+}
+
+/**
+ * Professional Audio Greeting
+ */
+function playWelcomeMessage() {
+    db.ref('settings/preferences/welcomeSound').once('value', snap => {
+        if (snap.val() !== false) testWelcomeMessage();
     });
 }
 
@@ -54,6 +116,7 @@ function initDashboard() {
     loadPaymentLogs();
     loadOrderRecovery();
     loadPricingConfig();
+    initTransactionNotifications();
     
     setInterval(() => {
         const time = new Date().toLocaleTimeString();
@@ -168,25 +231,25 @@ function updatePricingUI() {
 
 function loadAnalytics() {
     const metrics = [
-        { label: 'Active Users', node: 'analytics/activeUsers', id: 'count' },
-        { label: 'Total Products', node: 'products', id: 'count' },
-        { label: 'Total Orders', node: 'orders', id: 'count' },
-        { label: 'Revenue (₦)', node: 'analytics/totalRevenue', id: 'val' }
+        { label: 'Active Users', node: 'analytics/activeUsers', id: 'count', slug: 'ActiveUsers' },
+        { label: 'Total Products', node: 'products', id: 'count', slug: 'TotalProducts' },
+        { label: 'Total Orders', node: 'orders', id: 'count', slug: 'TotalOrders' },
+        { label: 'Revenue (₦)', node: 'analytics/totalRevenue', id: 'val', slug: 'TotalRevenue' }
     ];
 
     const grid = document.getElementById('analyticsGrid');
     grid.innerHTML = metrics.map(m => `
         <div class="stat-card">
             <span class="stat-label">${m.label}</span>
-            <h3 id="metric-${m.label.replace(/\s+/g, '')}">0</h3>
+            <h3 id="metric-${m.slug}">0</h3>
         </div>
     `).join('');
 
     metrics.forEach(m => {
         db.ref(m.node).on('value', snapshot => {
             const val = m.id === 'count' ? snapshot.numChildren() : snapshot.val() || 0;
-            document.getElementById(`metric-${m.label.replace(/\s+/g, '')}`).innerText = 
-                m.id === 'val' ? `₦${val.toLocaleString()}` : val;
+            const el = document.getElementById(`metric-${m.slug}`);
+            if (el) el.innerText = m.id === 'val' ? `₦${val.toLocaleString()}` : val;
         });
     });
 
@@ -437,35 +500,93 @@ function viewFullImage(url) {
 }
 
 function loadTransactions(filter = 'All') {
-    db.ref('orders').orderByChild('createdAt').on('value', snapshot => {
+    currentTransactionFilter = filter; // Update tracker
+    // Query 'transactions' instead of 'orders' to see Canceled/Failed/Pending attempts
+    db.ref('transactions').orderByChild('createdAt').on('value', snapshot => {
         const tbody = document.getElementById('transactionTableBody');
+        if (!tbody) return;
+        
         let html = '';
         snapshot.forEach(child => {
-            const o = child.val();
-            // Real-time verification check
-            if (filter === 'Successful' && o.paymentStatus !== 'Paid') return;
-            if (filter === 'Failed' && o.paymentStatus === 'Paid') return;
+            const t = child.val();
             
-            const statusClass = o.paymentStatus === 'Paid' ? 'successful' : 'failed';
-            const itemsSummary = o.items ? o.items.map(i => `${i.name} (x${i.quantity})`).join(', ') : 'N/A';
+            // Filtering Logic: Match status string exactly (Successful, Failed, Canceled, Pending)
+            if (filter !== 'All' && t.status !== filter) return;
+
+            const statusClass = t.status.toLowerCase();
+            
+            // Build "View Error" button if transaction failed
+            const errorBtn = (t.status === 'Failed' && t.lastError) 
+                ? `<button class="btn btn-xs btn-outline-danger" onclick="alert('Transaction Error:\\n\\n${t.lastError.replace(/'/g, "\\'")}')" style="margin-left:5px; padding:2px 5px; font-size:0.6rem; border-radius:4px; cursor:pointer;">View Error</button>`
+                : '';
+
+            const itemsSummary = t.items 
+                ? t.items.map(i => `${i.name} (x${i.quantity})`).join(', ') 
+                : (t.months ? `${t.months} Month License` : 'Subscription/Other');
 
             html = `
                 <tr>
                     <td>
-                        <strong>${o.customerName}</strong><br>
-                        <small>${o.phone} | ${o.email || 'N/A'}</small>
+                        <strong>${t.customerName || 'Anonymous'}</strong><br>
+                        <small>${t.phone || 'N/A'} | ${t.email || ''}</small>
                     </td>
                     <td>
-                        ₦${o.amount.toLocaleString()}<br>
+                        ₦${(t.amount || 0).toLocaleString()}<br>
                         <small style="color:#666">${itemsSummary}</small>
                     </td>
-                    <td><span class="badge badge-${statusClass}">${o.paymentStatus}</span><br><small>${o.ticketNumber}</small></td>
-                    <td><code>${o.paymentReference}</code></td>
-                    <td>${new Date(o.createdAt).toLocaleDateString()}</td>
+                    <td><span class="badge badge-${statusClass}">${t.status}</span>${errorBtn}</td>
+                    <td><code>${t.reference || t.paymentReference}</code></td>
+                    <td>${new Date(t.createdAt).toLocaleDateString()}</td>
                 </tr>` + html;
         });
-        tbody.innerHTML = html;
+        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">No activity found in this category.</td></tr>';
     });
+}
+
+/**
+ * Exports the currently filtered transaction set to a CSV file (Excel compatible)
+ */
+async function exportTransactionsToExcel() {
+    showToast("Preparing export...");
+    const snapshot = await db.ref('transactions').orderByChild('createdAt').once('value');
+    
+    let csv = 'Date,Time,Customer,Email,Phone,Amount(NGN),Items/Plan,Status,Reference,Error Message\n';
+
+    snapshot.forEach(child => {
+        const t = child.val();
+        // Respect current filter
+        if (currentTransactionFilter !== 'All' && t.status !== currentTransactionFilter) return;
+
+        const dateObj = new Date(t.createdAt);
+        const itemsSummary = t.items 
+            ? t.items.map(i => `${i.name} (x${i.quantity})`).join('; ') 
+            : (t.months ? `${t.months} Month License` : 'N/A');
+
+        const row = [
+            dateObj.toLocaleDateString(),
+            dateObj.toLocaleTimeString(),
+            `"${(t.customerName || 'Anonymous').replace(/"/g, '""')}"`,
+            t.email || 'N/A',
+            `'${t.phone || 'N/A'}`, // Prefix with apostrophe to prevent Excel stripping leading zeros
+            t.amount || 0,
+            `"${itemsSummary.replace(/"/g, '""')}"`,
+            t.status,
+            t.reference || t.paymentReference,
+            `"${(t.lastError || '').replace(/"/g, '""')}"`
+        ];
+        csv += row.join(',') + '\n';
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Auracious_SIP_Transactions_${currentTransactionFilter}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Export downloaded.");
 }
 
 function loadPaymentLogs() {
@@ -515,7 +636,8 @@ function loadOrderRecovery() {
             Object.keys(transactions).forEach(ref => {
                 const t = transactions[ref];
                 // Successful means Paystack verified it, but if it's not in orders...
-                if (t.status === 'Successful' && !orderRefs.has(ref)) {
+                if (!orderRefs.has(ref) && (t.status === 'Successful' || t.status === 'Pending')) {
+                    // Only show if it's potentially recoverable
                     orphanedCount++;
                     html += `
                         <tr>
@@ -523,12 +645,15 @@ function loadOrderRecovery() {
                             <td>₦${(t.amount || 0).toLocaleString()}</td>
                             <td><code>${ref}</code></td>
                             <td>${new Date(t.createdAt || t.updatedAt).toLocaleString()}</td>
-                            <td><button class="btn btn-sm btn-primary" onclick="window.open('https://dashboard.paystack.com/#/transactions?q=${ref}', '_blank')">Verify on Paystack</button></td>
+                            <td>
+                                <button class="btn btn-sm btn-success" onclick="adminManualVerify('${ref}')">Force Verify & Recover</button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="window.open('https://dashboard.paystack.com/#/transactions?q=${ref}', '_blank')">View on Paystack</button>
+                            </td>
                         </tr>`;
                 }
             });
 
-            tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">All paid transactions have matching orders.</td></tr>';
+            tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center">No pending or orphaned transactions found.</td></tr>';
             const badge = document.getElementById('recoveryBadge');
             if (badge) {
                 badge.innerText = orphanedCount;
@@ -536,6 +661,36 @@ function loadOrderRecovery() {
             }
         });
     });
+}
+
+/**
+ * Trigger centralized verification from Admin panel
+ */
+async function adminManualVerify(ref) {
+    if (!confirm(`Attempt to verify and recover transaction ${ref}?`)) return;
+    
+    try {
+        const res = await fetch(`${API_URL}/verify-payment/${ref}`);
+        const data = await res.json();
+        
+        if (!data.success) throw new Error(data.message);
+        
+        if (data.status === 'success') {
+            const amountStr = data.amount !== undefined ? `\nAmount: ₦${data.amount.toLocaleString()}` : '';
+            alert(`✅ Success: ${data.message}${amountStr}`);
+        } else if (data.status === 'pending') {
+            alert(`⏳ Pending: ${data.message}`);
+        } else {
+            alert(`❌ Failed: ${data.message}`);
+        }
+        
+        // Refresh local UI
+        loadOrderRecovery();
+        loadTransactions();
+        
+    } catch (e) {
+        alert("Verification Error: " + e.message);
+    }
 }
 
 function clearPaymentLogs() {
@@ -737,6 +892,21 @@ function loadSettings() {
             if (input) input.value = social[p] || '';
         });
     });
+
+    db.ref('settings/preferences/welcomeSound').on('value', snapshot => {
+        const check = document.getElementById('setting-welcome-sound');
+        if (check) check.checked = snapshot.val() !== false;
+    });
+
+    db.ref('settings/preferences/ceoName').on('value', snapshot => {
+        const input = document.getElementById('setting-ceo-name');
+        if (input) input.value = snapshot.val() || '';
+    });
+
+    db.ref('settings/preferences/greetingPhrase').on('value', snapshot => {
+        const input = document.getElementById('setting-greeting-phrase');
+        if (input) input.value = snapshot.val() || 'Welcome';
+    });
 }
 
 async function saveSocialLinks() {
@@ -753,13 +923,20 @@ async function saveSocialLinks() {
         updatedAt: Date.now()
     };
 
+    const welcomeSound = document.getElementById('setting-welcome-sound').checked;
+    const ceoName = document.getElementById('setting-ceo-name').value;
+    const greetingPhrase = document.getElementById('setting-greeting-phrase').value;
+
     try {
         await db.ref('settings/social').set(social);
+        await db.ref('settings/preferences/welcomeSound').set(welcomeSound);
+        await db.ref('settings/preferences/ceoName').set(ceoName);
+        await db.ref('settings/preferences/greetingPhrase').set(greetingPhrase);
         showToast("Social links updated successfully!");
     } catch (e) {
         showToast("Failed to save settings.", "error");
     } finally {
-        btn.innerText = "Save Social Media Links";
+        btn.innerText = "Save All Settings";
     }
 }
 
@@ -895,3 +1072,36 @@ document.getElementById('addProductForm').addEventListener('submit', async (e) =
         btn.disabled = false;
     }
 });
+
+/**
+ * Real-time transaction monitoring for live notifications
+ */
+const notifiedTransactions = new Set();
+function initTransactionNotifications() {
+    const bootTime = Date.now();
+
+    const handleTransaction = (snapshot) => {
+        const t = snapshot.val();
+        const ref = t.reference || t.paymentReference;
+        
+        // Notify only if status is Successful, it's new/updated since login, and not already notified
+        const isNew = (t.updatedAt || t.createdAt) >= bootTime;
+        if (t.status === 'Successful' && isNew && !notifiedTransactions.has(ref)) {
+            notifiedTransactions.add(ref);
+            showTransactionNotification(t);
+        }
+    };
+
+    // Listen for status updates (e.g. Pending -> Successful)
+    db.ref('transactions').on('child_changed', handleTransaction);
+    // Listen for immediate successes
+    db.ref('transactions').on('child_added', handleTransaction);
+}
+
+function showTransactionNotification(t) {
+    const amount = (t.amount || 0).toLocaleString();
+    const msg = `Attention: New payment of ₦${amount} received from ${t.customerName || 'Anonymous'}`;
+    
+    if (typeof showToast === 'function') showToast(msg, "success");
+    speakNow(msg); // Uses existing authoritative voice logic
+}

@@ -1,14 +1,7 @@
 // api/subscription.js - Handle Subscription Verification & Tinubu Overrides
-const { admin, db, verifyPaystack, processSubscription } = require('./backend');
+const { db, verifyPaystack, processSubscription } = require('./backend');
 
-module.exports = async (req, res) => {
-    // Handle CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') return res.status(200).end();
-
+const handleSubscription = async (req, res) => {
     // Handle Tinubu Panel Price Updates (POST with special action)
     if (req.method === 'PATCH') {
         const { monthlyPrice, grace } = req.body;
@@ -63,6 +56,10 @@ module.exports = async (req, res) => {
         const result = await processSubscription(reference, months, amountPaid, frontendAmount);
         return res.status(200).json(result);
     } catch (error) {
+        // Update transaction status to Failed for Admin visibility
+        if (reference) await db.ref(`transactions/${reference}`).update({ status: 'Failed', lastError: error.message });
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+module.exports = { handleSubscription };

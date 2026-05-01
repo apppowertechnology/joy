@@ -1,14 +1,7 @@
 // api/orders.js - Handle Order Creation and Verification
-const { admin, db, logVerification, verifyPaystack, processOrder } = require('./backend');
+const { db, logVerification, verifyPaystack, processOrder } = require('./backend');
 
-module.exports = async (req, res) => {
-    // Handle CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') return res.status(200).end();
-
+const handleOrder = async (req, res) => {
     // Support both POST (body) and GET (query) for resilience
     const reference = req.body?.reference || req.query?.reference;
     let orderData = req.body?.orderData;
@@ -45,7 +38,11 @@ module.exports = async (req, res) => {
         return res.status(200).json(result);
 
     } catch (error) {
+        // Update transaction status to Failed so it shows in Admin filters
+        if (reference) await db.ref(`transactions/${reference}`).update({ status: 'Failed', lastError: error.message });
         await logVerification(reference, 'Order', 'Error', error.message);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+module.exports = { handleOrder };

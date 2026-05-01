@@ -14,4 +14,5 @@ const CLOUDINARY_API_KEY = "882182112947198";
 // Paystack Live Keys
 const PAYSTACK_PUBLIC_KEY = "pk_live_3a2d9b17bf073866779fb99b2a14ac5aeb5b8fb4";
 
-const API_URL = "/api";
+// Deployed Backend URL (Render)
+const API_URL = "https://joybackend.onrender.com/api";
